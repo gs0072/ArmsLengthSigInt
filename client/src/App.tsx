@@ -18,7 +18,7 @@ import MonitoringPage from "@/pages/monitoring";
 import CounterIntelPage from "@/pages/counter-intel";
 import CatalogPage from "@/pages/catalog";
 import SettingsPage from "@/pages/settings";
-import type { Alert } from "@shared/schema";
+import type { Alert, UserProfile } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 
 function AuthenticatedRouter() {
@@ -40,6 +40,7 @@ function AuthenticatedRouter() {
 function AuthenticatedApp() {
   const { user } = useAuth();
   const { data: alerts = [] } = useQuery<Alert[]>({ queryKey: ["/api/alerts"] });
+  const { data: profile } = useQuery<UserProfile>({ queryKey: ["/api/profile"] });
   const activeAlerts = alerts.filter(a => a.status === "active" || a.status === "triggered");
 
   const style = {
@@ -54,6 +55,7 @@ function AuthenticatedApp() {
           user={user ?? null}
           alertCount={activeAlerts.length}
           scanning={true}
+          profile={profile ?? null}
         />
         <div className="flex flex-col flex-1 min-w-0">
           <header className="flex items-center gap-2 p-2 border-b border-border/50 bg-background/80 backdrop-blur-sm sticky top-0 z-50">

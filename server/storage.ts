@@ -36,6 +36,8 @@ export interface IStorage {
 
   getUserProfile(userId: string): Promise<UserProfile | undefined>;
   upsertUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
+  countUserProfiles(): Promise<number>;
+  getAllUserProfiles(): Promise<UserProfile[]>;
 
   logActivity(userId: string, action: string, details?: string, ipAddress?: string): Promise<void>;
 
@@ -151,6 +153,15 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return upserted;
+  }
+
+  async countUserProfiles(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)::int` }).from(userProfiles);
+    return result[0]?.count ?? 0;
+  }
+
+  async getAllUserProfiles(): Promise<UserProfile[]> {
+    return db.select().from(userProfiles);
   }
 
   async logActivity(userId: string, action: string, details?: string, ipAddress?: string): Promise<void> {

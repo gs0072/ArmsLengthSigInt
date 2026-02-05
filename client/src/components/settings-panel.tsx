@@ -6,8 +6,12 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, Zap, HardDrive } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, Zap, HardDrive, Crown, UserCog } from "lucide-react";
 import { GlowLine } from "./scan-animation";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import type { UserProfile } from "@shared/schema";
 
 interface SettingsPanelProps {
   dataMode: string;
@@ -33,6 +37,27 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     adsb: true,
     sensor: true,
   });
+  const { toast } = useToast();
+
+  const isAdmin = userTier === "admin";
+
+  const { data: adminUsers = [] } = useQuery<UserProfile[]>({
+    queryKey: ["/api/admin/users"],
+    enabled: isAdmin,
+  });
+
+  const updateUserTierMutation = useMutation({
+    mutationFn: async ({ targetUserId, tier }: { targetUserId: string; tier: string }) => {
+      return apiRequest("PATCH", `/api/admin/users/${targetUserId}`, { tier });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({ title: "User Updated", description: "User tier has been changed successfully." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update user tier.", variant: "destructive" });
+    },
+  });
 
   const storagePercent = storageLimit > 0 ? (storageUsed / storageLimit) * 100 : 0;
   const formatBytes = (b: number) => {
@@ -49,6 +74,14 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     admin: "hsl(0, 72%, 55%)",
   };
 
+  const tierDescriptions: Record<string, string> = {
+    free: "2 GB storage, local data only, basic signal filters",
+    basic: "5 GB storage, friend sharing, enhanced scanning",
+    professional: "20 GB storage, public data access, advanced triangulation",
+    enterprise: "100 GB storage, full OSINT integration, priority processing",
+    admin: "10 GB storage, full platform access, user management, system configuration",
+  };
+
   return (
     <Card className="flex flex-col h-full overflow-visible">
       <CardHeader className="flex flex-row items-center gap-2 pb-2 px-3 pt-3">
@@ -63,10 +96,14 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
               <Users className="w-3.5 h-3.5 text-muted-foreground" />
               <h4 className="text-xs font-medium">Account Tier</h4>
             </div>
-            <Badge variant="outline" style={{ color: tierColors[userTier], borderColor: tierColors[userTier] }} className="text-[9px] uppercase">
+            <Badge variant="outline" style={{ color: tierColors[userTier], borderColor: tierColors[userTier] }} className="text-[9px] uppercase" data-testid="badge-user-tier">
+              {userTier === "admin" && <Crown className="w-3 h-3 mr-1" />}
               {userTier}
             </Badge>
           </div>
+          <p className="text-[10px] text-muted-foreground" data-testid="text-tier-description">
+            {tierDescriptions[userTier] || "Unknown tier"}
+          </p>
         </div>
 
         <GlowLine />
@@ -175,6 +212,50 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             <Switch checked={interrogationDetection} onCheckedChange={setInterrogationDetection} data-testid="switch-interrogation" />
           </div>
         </div>
+
+        {isAdmin && (
+          <>
+            <GlowLine />
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <UserCog className="w-3.5 h-3.5 text-destructive" />
+                <h4 className="text-xs font-medium text-destructive">Admin: User Management</h4>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Manage user tiers and access levels for all platform users.
+              </p>
+              {adminUsers.length === 0 && (
+                <p className="text-[10px] text-muted-foreground italic">No other users registered yet.</p>
+              )}
+              {adminUsers.map(u => (
+                <div key={u.userId} className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/10 border border-border/30">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-mono truncate" data-testid={`text-admin-user-${u.userId}`}>
+                      {u.userId}
+                    </p>
+                  </div>
+                  <Select
+                    value={u.tier}
+                    onValueChange={(newTier) => {
+                      updateUserTierMutation.mutate({ targetUserId: u.userId, tier: newTier });
+                    }}
+                  >
+                    <SelectTrigger className="w-28 text-[10px]" data-testid={`select-tier-${u.userId}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="free">Free</SelectItem>
+                      <SelectItem value="basic">Basic</SelectItem>
+                      <SelectItem value="professional">Professional</SelectItem>
+                      <SelectItem value="enterprise">Enterprise</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );

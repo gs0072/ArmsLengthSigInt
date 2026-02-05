@@ -19,12 +19,14 @@ import {
   BookOpen, Settings, LogOut, Radar, Activity, Globe, Radio
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
+import type { UserProfile } from "@shared/schema";
 import { ScanPulse } from "./scan-animation";
 
 interface AppSidebarProps {
   user: User | null;
   alertCount: number;
   scanning: boolean;
+  profile?: UserProfile | null;
 }
 
 const navItems = [
@@ -38,7 +40,7 @@ const navItems = [
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 
-export function AppSidebar({ user, alertCount, scanning }: AppSidebarProps) {
+export function AppSidebar({ user, alertCount, scanning, profile }: AppSidebarProps) {
   const [location, setLocation] = useLocation();
 
   return (
@@ -127,9 +129,24 @@ export function AppSidebar({ user, alertCount, scanning }: AppSidebarProps) {
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">
-                {user.firstName ? `${user.firstName} ${user.lastName || ""}`.trim() : user.email || "User"}
-              </p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-xs font-medium truncate">
+                  {user.firstName ? `${user.firstName} ${user.lastName || ""}`.trim() : user.email || "User"}
+                </p>
+                {profile?.tier && (
+                  <Badge
+                    variant="outline"
+                    className="text-[8px] uppercase px-1 py-0"
+                    style={{
+                      color: profile.tier === "admin" ? "hsl(0, 72%, 55%)" : profile.tier === "enterprise" ? "hsl(45, 90%, 55%)" : "hsl(185, 100%, 50%)",
+                      borderColor: profile.tier === "admin" ? "hsl(0, 72%, 55%)" : profile.tier === "enterprise" ? "hsl(45, 90%, 55%)" : "hsl(185, 100%, 50%)",
+                    }}
+                    data-testid="badge-sidebar-tier"
+                  >
+                    {profile.tier}
+                  </Badge>
+                )}
+              </div>
               <p className="text-[9px] text-muted-foreground truncate">{user.email}</p>
             </div>
             <Button
