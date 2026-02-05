@@ -1,18 +1,170 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
+import { sql, relations } from "drizzle-orm";
+import { pgTable, text, varchar, integer, real, boolean, timestamp, jsonb, pgEnum } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export * from "./models/auth";
+
+export const signalTypeEnum = pgEnum("signal_type", [
+  "bluetooth",
+  "wifi",
+  "rfid",
+  "sdr",
+  "lora",
+  "meshtastic",
+  "adsb",
+  "sensor",
+  "unknown"
+]);
+
+export const alertStatusEnum = pgEnum("alert_status", [
+  "active",
+  "triggered",
+  "dismissed",
+  "expired"
+]);
+
+export const dataModeEnum = pgEnum("data_mode", [
+  "local",
+  "friends",
+  "public",
+  "osint"
+]);
+
+export const userTierEnum = pgEnum("user_tier", [
+  "free",
+  "basic",
+  "professional",
+  "enterprise",
+  "admin"
+]);
+
+export const devices = pgTable("devices", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  name: text("name"),
+  macAddress: text("mac_address"),
+  uuid: text("uuid"),
+  manufacturer: text("manufacturer"),
+  model: text("model"),
+  deviceType: text("device_type"),
+  signalType: signalTypeEnum("signal_type").notNull().default("unknown"),
+  firstSeenAt: timestamp("first_seen_at").defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow(),
+  isTracked: boolean("is_tracked").default(false),
+  isFlagged: boolean("is_flagged").default(false),
+  notes: text("notes"),
+  metadata: jsonb("metadata"),
+  associatedDeviceIds: integer("associated_device_ids").array(),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const observations = pgTable("observations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  deviceId: integer("device_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  signalType: signalTypeEnum("signal_type").notNull(),
+  signalStrength: real("signal_strength"),
+  frequency: real("frequency"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  altitude: real("altitude"),
+  heading: real("heading"),
+  speed: real("speed"),
+  rawData: text("raw_data"),
+  hexData: text("hex_data"),
+  asciiData: text("ascii_data"),
+  channel: integer("channel"),
+  protocol: text("protocol"),
+  encryption: text("encryption"),
+  observedAt: timestamp("observed_at").defaultNow(),
+  metadata: jsonb("metadata"),
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export const alerts = pgTable("alerts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  alertType: text("alert_type").notNull(),
+  status: alertStatusEnum("status").notNull().default("active"),
+  criteria: jsonb("criteria").notNull(),
+  triggeredAt: timestamp("triggered_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  deviceId: integer("device_id"),
+});
+
+export const deviceCatalog = pgTable("device_catalog", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  category: text("category").notNull(),
+  subcategory: text("subcategory"),
+  manufacturer: text("manufacturer").notNull(),
+  model: text("model").notNull(),
+  signalTypes: text("signal_types").array(),
+  description: text("description"),
+  commonIdentifiers: text("common_identifiers"),
+  frequency: text("frequency"),
+});
+
+export const userProfiles = pgTable("user_profiles", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull().unique(),
+  tier: userTierEnum("tier").notNull().default("free"),
+  dataMode: dataModeEnum("data_mode").notNull().default("local"),
+  storageUsedBytes: integer("storage_used_bytes").default(0),
+  storageLimitBytes: integer("storage_limit_bytes").default(2147483648),
+  settings: jsonb("settings"),
+  trustedUserIds: text("trusted_user_ids").array(),
+});
+
+export const activityLog = pgTable("activity_log", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  action: text("action").notNull(),
+  details: text("details"),
+  ipAddress: text("ip_address"),
+  timestamp: timestamp("timestamp").defaultNow(),
+});
+
+export const followingDetection = pgTable("following_detection", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  deviceId: integer("device_id").notNull(),
+  encounterCount: integer("encounter_count").default(1),
+  firstEncounter: timestamp("first_encounter").defaultNow(),
+  lastEncounter: timestamp("last_encounter").defaultNow(),
+  riskScore: real("risk_score").default(0),
+  status: text("status").default("monitoring"),
+  locationHistory: jsonb("location_history"),
+});
+
+export const devicesRelations = relations(devices, ({ many }) => ({
+  observations: many(observations),
+}));
+
+export const observationsRelations = relations(observations, ({ one }) => ({
+  device: one(devices, {
+    fields: [observations.deviceId],
+    references: [devices.id],
+  }),
+}));
+
+export const insertDeviceSchema = createInsertSchema(devices).omit({ id: true, firstSeenAt: true, lastSeenAt: true });
+export const insertObservationSchema = createInsertSchema(observations).omit({ id: true, observedAt: true });
+export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, createdAt: true, triggeredAt: true });
+export const insertDeviceCatalogSchema = createInsertSchema(deviceCatalog).omit({ id: true });
+export const insertUserProfileSchema = createInsertSchema(userProfiles).omit({ id: true });
+export const insertActivityLogSchema = createInsertSchema(activityLog).omit({ id: true, timestamp: true });
+export const insertFollowingDetectionSchema = createInsertSchema(followingDetection).omit({ id: true, firstEncounter: true, lastEncounter: true });
+
+export type InsertDevice = z.infer<typeof insertDeviceSchema>;
+export type Device = typeof devices.$inferSelect;
+export type InsertObservation = z.infer<typeof insertObservationSchema>;
+export type Observation = typeof observations.$inferSelect;
+export type InsertAlert = z.infer<typeof insertAlertSchema>;
+export type Alert = typeof alerts.$inferSelect;
+export type DeviceCatalogEntry = typeof deviceCatalog.$inferSelect;
+export type InsertDeviceCatalogEntry = z.infer<typeof insertDeviceCatalogSchema>;
+export type UserProfile = typeof userProfiles.$inferSelect;
+export type InsertUserProfile = z.infer<typeof insertUserProfileSchema>;
+export type ActivityLogEntry = typeof activityLog.$inferSelect;
+export type FollowingDetectionEntry = typeof followingDetection.$inferSelect;
