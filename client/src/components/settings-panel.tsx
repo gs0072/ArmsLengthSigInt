@@ -2,16 +2,17 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2, Monitor, Server } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2, Monitor, Server, UserPlus, Mail, ExternalLink, Layers } from "lucide-react";
 import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { AddSensorDialog } from "./add-sensor-dialog";
-import type { UserProfile, CollectionSensor } from "@shared/schema";
+import type { UserProfile, CollectionSensor, TrustedUser } from "@shared/schema";
 
 interface SettingsPanelProps {
   dataMode: string;
@@ -21,13 +22,54 @@ interface SettingsPanelProps {
   userTier: string;
 }
 
+const OSINT_DATA_SOURCES = [
+  { name: "WiGLE", desc: "Wireless network mapping database", url: "https://wigle.net", type: "wifi" },
+  { name: "ADS-B Exchange", desc: "Unfiltered aircraft tracking", url: "https://adsbexchange.com", type: "adsb" },
+  { name: "OpenCellID", desc: "Open cell tower location database", url: "https://opencellid.org", type: "sensor" },
+  { name: "FCC ULS", desc: "FCC license database for radio stations", url: "https://wireless2.fcc.gov/UlsApp/UlsSearch/searchLicense.jsp", type: "sdr" },
+  { name: "Shodan", desc: "Internet-connected device search engine", url: "https://shodan.io", type: "wifi" },
+  { name: "Censys", desc: "Internet-wide device scanning database", url: "https://censys.io", type: "wifi" },
+  { name: "MarineTraffic", desc: "Global vessel tracking (AIS)", url: "https://marinetraffic.com", type: "sensor" },
+  { name: "FlightRadar24", desc: "Real-time aircraft tracking", url: "https://flightradar24.com", type: "adsb" },
+  { name: "RadioReference", desc: "Scanner frequency database", url: "https://radioreference.com", type: "sdr" },
+  { name: "Meshtastic Nodes DB", desc: "Meshtastic mesh node registry", url: "https://meshtastic.org", type: "lora" },
+  { name: "APRS-IS", desc: "Amateur radio APRS position reports", url: "https://aprs.fi", type: "sdr" },
+  { name: "HaveIBeenPwned", desc: "Breach data for device/email cross-ref", url: "https://haveibeenpwned.com", type: "osint" },
+];
+
 export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storageLimit, userTier }: SettingsPanelProps) {
   const [showNotifications, setShowNotifications] = useState(true);
   const [followingDetection, setFollowingDetection] = useState(true);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [trustedEmail, setTrustedEmail] = useState("");
+  const [trustedAlias, setTrustedAlias] = useState("");
   const { toast } = useToast();
 
   const isAdmin = userTier === "admin";
+
+  const { data: trustedUsers = [] } = useQuery<TrustedUser[]>({
+    queryKey: ["/api/trusted-users"],
+  });
+
+  const addTrustedMutation = useMutation({
+    mutationFn: async (data: { email: string; alias: string }) =>
+      apiRequest("POST", "/api/trusted-users", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trusted-users"] });
+      setTrustedEmail("");
+      setTrustedAlias("");
+      toast({ title: "Trusted user added" });
+    },
+    onError: () => toast({ title: "Failed to add trusted user", variant: "destructive" }),
+  });
+
+  const removeTrustedMutation = useMutation({
+    mutationFn: async (id: number) => apiRequest("DELETE", `/api/trusted-users/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trusted-users"] });
+      toast({ title: "Trusted user removed" });
+    },
+  });
   const hasGeolocation = typeof navigator !== "undefined" && "geolocation" in navigator;
 
   const { data: systemInfo } = useQuery<{
@@ -227,6 +269,7 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
               <SelectItem value="friends">Friends & Trusted Users</SelectItem>
               <SelectItem value="public">Public Shared Data</SelectItem>
               <SelectItem value="osint">Open Source Datasets</SelectItem>
+              <SelectItem value="combined">Combined / All Sources</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">
@@ -234,7 +277,112 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             {dataMode === "friends" && "Combining data from trusted user connections"}
             {dataMode === "public" && "Including publicly shared collections from all users"}
             {dataMode === "osint" && "Integrating with open source intelligence datasets"}
+            {dataMode === "combined" && "Combining all data sources: local, friends, public, and OSINT"}
           </p>
+
+          {dataMode === "friends" && (
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Users className="w-3 h-3 text-muted-foreground" />
+                <h5 className="text-[10px] uppercase tracking-wider text-muted-foreground">Trusted Users ({trustedUsers.length})</h5>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="user@email.com"
+                  value={trustedEmail}
+                  onChange={(e) => setTrustedEmail(e.target.value)}
+                  className="text-xs h-8"
+                  data-testid="input-trusted-email"
+                />
+                <Input
+                  placeholder="Alias (optional)"
+                  value={trustedAlias}
+                  onChange={(e) => setTrustedAlias(e.target.value)}
+                  className="text-xs h-8 w-28"
+                  data-testid="input-trusted-alias"
+                />
+                <Button
+                  size="sm"
+                  disabled={!trustedEmail.includes("@") || addTrustedMutation.isPending}
+                  onClick={() => addTrustedMutation.mutate({ email: trustedEmail, alias: trustedAlias })}
+                  data-testid="button-add-trusted"
+                >
+                  {addTrustedMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                </Button>
+              </div>
+              {trustedUsers.length > 0 && (
+                <div className="space-y-1">
+                  {trustedUsers.map(tu => (
+                    <div key={tu.id} className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/10 border border-border/30" data-testid={`trusted-user-${tu.id}`}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Mail className="w-3 h-3 text-muted-foreground shrink-0" />
+                        <span className="text-xs truncate">{tu.trustedEmail}</span>
+                        {tu.trustedAlias && <Badge variant="outline" className="text-[8px] shrink-0">{tu.trustedAlias}</Badge>}
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => removeTrustedMutation.mutate(tu.id)}
+                        data-testid={`button-remove-trusted-${tu.id}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {trustedUsers.length === 0 && (
+                <p className="text-[10px] text-muted-foreground/60 text-center py-2">No trusted users added yet. Add users by email to share collection data.</p>
+              )}
+            </div>
+          )}
+
+          {dataMode === "osint" && (
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Globe className="w-3 h-3 text-muted-foreground" />
+                <h5 className="text-[10px] uppercase tracking-wider text-muted-foreground">OSINT Data Sources</h5>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {OSINT_DATA_SOURCES.map(src => (
+                  <div key={src.name} className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/10 border border-border/30">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Badge variant="outline" className="text-[7px] shrink-0">{src.type}</Badge>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-medium truncate">{src.name}</p>
+                        <p className="text-[9px] text-muted-foreground truncate">{src.desc}</p>
+                      </div>
+                    </div>
+                    <a href={src.url} target="_blank" rel="noopener noreferrer">
+                      <Button size="icon" variant="ghost" data-testid={`button-osint-${src.name.toLowerCase().replace(/\s+/g, "-")}`}>
+                        <ExternalLink className="w-3 h-3" />
+                      </Button>
+                    </a>
+                  </div>
+                ))}
+              </div>
+              <div className="p-2 rounded-md bg-primary/5 border border-primary/20">
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="text-primary font-medium">HUMINT Linking:</span> Associate human identities, aliases, and personas to detected nodes via the Node Report page. Click any node and use the Intelligence Links section to create HUMINT associations.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {dataMode === "combined" && (
+            <div className="mt-3 p-2 rounded-md bg-muted/10 border border-border/30">
+              <div className="flex items-center gap-2 mb-2">
+                <Layers className="w-3 h-3 text-primary" />
+                <h5 className="text-[10px] font-medium">Active Data Sources</h5>
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                <Badge variant="outline" className="text-[8px]">Local Collections</Badge>
+                <Badge variant="outline" className="text-[8px]">Friends ({trustedUsers.length})</Badge>
+                <Badge variant="outline" className="text-[8px]">Public Data</Badge>
+                <Badge variant="outline" className="text-[8px]">OSINT ({OSINT_DATA_SOURCES.length} sources)</Badge>
+              </div>
+            </div>
+          )}
         </div>
 
         <GlowLine />

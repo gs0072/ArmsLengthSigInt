@@ -19,13 +19,14 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
-import type { Device, Observation } from "@shared/schema";
+import type { Device, Observation, DeviceAssociation } from "@shared/schema";
 import {
   getSignalColor, getSignalLabel, timeAgo, formatCoordinates,
   formatFrequency, signalStrengthToPercent, signalStrengthLabel,
   SIGNAL_TYPES
 } from "@/lib/signal-utils";
 import { apiRequest } from "@/lib/queryClient";
+import { NodeLinkGraph, ASSOC_DISCIPLINE, ASSOC_TYPE_LABELS, ASSOC_TYPE_COLORS } from "@/components/node-link-graph";
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -69,6 +70,11 @@ export default function NodeReportPage() {
 
   const { data: devices = [] } = useQuery<Device[]>({ queryKey: ["/api/devices"] });
   const { data: allObservations = [] } = useQuery<Observation[]>({ queryKey: ["/api/observations"] });
+  const { data: associations = [] } = useQuery<DeviceAssociation[]>({ queryKey: ["/api/associations"] });
+  const { data: triangulationData } = useQuery<{ success: boolean; triangulation?: any; message?: string }>({
+    queryKey: ["/api/devices", deviceId, "triangulate"],
+    enabled: !!deviceId,
+  });
 
   const device = devices.find(d => d.id === deviceId);
   const deviceObs = useMemo(() =>
@@ -78,6 +84,11 @@ export default function NodeReportPage() {
     [allObservations, deviceId]
   );
   const obsWithLocation = useMemo(() => deviceObs.filter(o => o.latitude && o.longitude), [deviceObs]);
+
+  const nodeAssociations = useMemo(() =>
+    associations.filter(a => a.deviceId1 === deviceId || a.deviceId2 === deviceId),
+    [associations, deviceId]
+  );
 
   const [aiReport, setAiReport] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -204,34 +215,6 @@ export default function NodeReportPage() {
   const pagedObs = sortedObs.slice(obsPage * OBS_PER_PAGE, (obsPage + 1) * OBS_PER_PAGE);
   const totalPages = Math.ceil(sortedObs.length / OBS_PER_PAGE);
 
-  const associatedDevices = useMemo(() => {
-    if (!device?.associatedDeviceIds) return [];
-    return devices.filter(d => device.associatedDeviceIds!.includes(d.id));
-  }, [device, devices]);
-
-  const colocatedDevices = useMemo(() => {
-    if (obsWithLocation.length === 0) return [];
-    const nearby: Map<number, { device: Device; count: number; lastSeen: string }> = new Map();
-    obsWithLocation.forEach(obs => {
-      const others = allObservations.filter(o =>
-        o.deviceId !== deviceId &&
-        o.latitude && o.longitude &&
-        Math.abs(new Date(o.observedAt!).getTime() - new Date(obs.observedAt!).getTime()) < 3600000 &&
-        haversineDistance(obs.latitude!, obs.longitude!, o.latitude!, o.longitude!) < 0.5
-      );
-      others.forEach(o => {
-        const existing = nearby.get(o.deviceId);
-        if (existing) {
-          existing.count++;
-          if (new Date(o.observedAt!) > new Date(existing.lastSeen)) existing.lastSeen = o.observedAt!.toString();
-        } else {
-          const dev = devices.find(d => d.id === o.deviceId);
-          if (dev) nearby.set(o.deviceId, { device: dev, count: 1, lastSeen: o.observedAt!.toString() });
-        }
-      });
-    });
-    return Array.from(nearby.values()).sort((a, b) => b.count - a.count);
-  }, [obsWithLocation, allObservations, devices, deviceId]);
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current || obsWithLocation.length === 0) return;
@@ -708,73 +691,139 @@ export default function NodeReportPage() {
           </div>
         </Card>
 
-        <Card className="overflow-visible" data-testid="section-associated-devices">
-          <div className="flex items-center gap-2 p-4 border-b border-border/50">
-            <Network className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-bold uppercase tracking-wider">Associated Devices</h2>
+        <Card className="overflow-visible" data-testid="section-link-analysis">
+          <div className="flex items-center justify-between gap-2 p-4 border-b border-border/50 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Network className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-bold uppercase tracking-wider">Intelligence Links</h2>
+              {nodeAssociations.length > 0 && (
+                <Badge variant="outline" className="text-[9px]">{nodeAssociations.length} links</Badge>
+              )}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setLocation("/link-analysis")} data-testid="button-full-link-analysis">
+              <Network className="w-3.5 h-3.5 mr-1" /> Full Link Analysis
+            </Button>
           </div>
-          <CardContent className="p-4">
-            {associatedDevices.length === 0 && colocatedDevices.length === 0 ? (
+          <CardContent className="p-0">
+            {nodeAssociations.length === 0 ? (
               <div className="text-center py-8">
                 <Network className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-xs text-muted-foreground">No associated devices found</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-1">Devices detected nearby will appear here</p>
+                <p className="text-xs text-muted-foreground">No intelligence links established</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-1">Run association analysis from the Dashboard to discover device relationships</p>
               </div>
             ) : (
-              <div className="space-y-4">
-                {associatedDevices.length > 0 && (
-                  <div>
-                    <h3 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <Link2 className="w-3 h-3" /> Linked Devices
-                    </h3>
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {associatedDevices.map(dev => (
+              <div>
+                <NodeLinkGraph
+                  devices={devices}
+                  associations={associations}
+                  focusNodeId={deviceId}
+                  onNodeSelect={(dev) => { if (dev && dev.id !== deviceId) setLocation(`/node-report/${dev.id}`); }}
+                  height={350}
+                />
+                <div className="p-4 border-t border-border/50 space-y-2">
+                  <h3 className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Link2 className="w-3 h-3" /> Association Summary
+                  </h3>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    {nodeAssociations.map(assoc => {
+                      const linkedId = assoc.deviceId1 === deviceId ? assoc.deviceId2 : assoc.deviceId1;
+                      const linkedDev = devices.find(d => d.id === linkedId);
+                      const discipline = ASSOC_DISCIPLINE[assoc.associationType] || "MULTI-INT";
+                      const color = ASSOC_TYPE_COLORS[assoc.associationType] || "#778899";
+                      return (
                         <div
-                          key={dev.id}
+                          key={assoc.id}
                           className="p-3 rounded-md bg-muted/10 border border-border/30 cursor-pointer hover-elevate"
-                          onClick={() => setLocation(`/node-report/${dev.id}`)}
-                          data-testid={`linked-device-${dev.id}`}
+                          onClick={() => setLocation(`/node-report/${linkedId}`)}
+                          data-testid={`assoc-link-${assoc.id}`}
                         >
-                          <div className="flex items-center gap-2 mb-1">
-                            <SignalBadge type={dev.signalType} size="sm" />
-                            <span className="text-xs font-medium truncate">{dev.name || "Unknown"}</span>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground font-mono">{dev.macAddress || dev.uuid || `ID-${dev.id}`}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {colocatedDevices.length > 0 && (
-                  <div>
-                    <h3 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <MapPin className="w-3 h-3" /> Co-located Devices
-                    </h3>
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {colocatedDevices.slice(0, 9).map(({ device: dev, count, lastSeen }) => (
-                        <div
-                          key={dev.id}
-                          className="p-3 rounded-md bg-muted/10 border border-border/30 cursor-pointer hover-elevate"
-                          onClick={() => setLocation(`/node-report/${dev.id}`)}
-                          data-testid={`colocated-device-${dev.id}`}
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-1">
+                          <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
                             <div className="flex items-center gap-2 min-w-0">
-                              <SignalBadge type={dev.signalType} size="sm" />
-                              <span className="text-xs font-medium truncate">{dev.name || "Unknown"}</span>
+                              {linkedDev && <SignalBadge type={linkedDev.signalType} size="sm" />}
+                              <span className="text-xs font-medium truncate">{linkedDev?.name || `Node ${linkedId}`}</span>
                             </div>
-                            <Badge variant="outline" className="text-[8px] shrink-0">{count}x</Badge>
+                            <Badge variant="outline" className="text-[8px] shrink-0" style={{ borderColor: color, color }}>
+                              {discipline}
+                            </Badge>
                           </div>
-                          <p className="text-[10px] text-muted-foreground">Last co-located: {timeAgo(lastSeen)}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] text-muted-foreground">{ASSOC_TYPE_LABELS[assoc.associationType] || assoc.associationType}</span>
+                            <span className="text-[10px] font-mono" style={{ color }}>{assoc.confidence}%</span>
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
+
+        {triangulationData?.success && triangulationData.triangulation && (
+          <Card className="overflow-visible" data-testid="section-triangulation">
+            <div className="flex items-center gap-2 p-4 border-b border-border/50">
+              <Target className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-bold uppercase tracking-wider">GEOINT Position Fix</h2>
+              <Badge variant="outline" className="text-[9px] ml-auto">{triangulationData.triangulation.confidence}% confidence</Badge>
+            </div>
+            <CardContent className="p-4">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                <div className="p-2.5 rounded-md bg-muted/10 border border-border/30">
+                  <p className="text-[9px] text-muted-foreground uppercase">Estimated Position</p>
+                  <p className="text-sm font-bold font-mono text-primary" data-testid="tri-position">
+                    {triangulationData.triangulation.estimatedLat.toFixed(6)}, {triangulationData.triangulation.estimatedLon.toFixed(6)}
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-md bg-muted/10 border border-border/30">
+                  <p className="text-[9px] text-muted-foreground uppercase">Error Radius (CEP)</p>
+                  <p className="text-sm font-bold font-mono" data-testid="tri-error">
+                    {triangulationData.triangulation.errorRadiusM.toFixed(0)}m
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-md bg-muted/10 border border-border/30">
+                  <p className="text-[9px] text-muted-foreground uppercase">Sensor Positions</p>
+                  <p className="text-sm font-bold font-mono" data-testid="tri-sensors">
+                    {triangulationData.triangulation.sensorPositions}
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-md bg-muted/10 border border-border/30">
+                  <p className="text-[9px] text-muted-foreground uppercase">Method</p>
+                  <p className="text-[10px] font-medium" data-testid="tri-method">
+                    {triangulationData.triangulation.method}
+                  </p>
+                </div>
+              </div>
+              {triangulationData.triangulation.rangeEstimates?.length > 0 && (
+                <div>
+                  <h3 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <Crosshair className="w-3 h-3" /> Range/Bearing Estimates
+                  </h3>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {triangulationData.triangulation.rangeEstimates.slice(0, 6).map((est: any, i: number) => (
+                      <div key={i} className="p-2 rounded-md bg-muted/10 border border-border/30">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {est.sensorLat.toFixed(4)}, {est.sensorLon.toFixed(4)}
+                          </span>
+                          <Badge variant="outline" className="text-[8px]">{est.rssi} dBm</Badge>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 flex-wrap">
+                          <span className="text-[10px] text-muted-foreground">
+                            Range: <span className="text-foreground font-mono">{est.estimatedDistanceM.toFixed(0)}m</span>
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            Bearing: <span className="text-foreground font-mono">{est.bearing.toFixed(1)}°</span>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="overflow-visible" data-testid="section-timeline">
           <div className="flex items-center gap-2 p-4 border-b border-border/50">

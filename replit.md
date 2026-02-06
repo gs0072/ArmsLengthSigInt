@@ -1,143 +1,7 @@
 # SIGINT Hub - Signal Intelligence Platform
 
 ## Overview
-A comprehensive signal intelligence platform for collecting, analyzing, and triangulating Bluetooth, WiFi, RFID, SDR, LoRa, and sensor data with geospatial mapping, multi-user collaboration, and AI-powered device analysis. Designed for search and rescue, law enforcement, military operations, and open-source intelligence hobbyists.
-
-## Current State
-- MVP with full CRUD for nodes (detected devices/signals), observations, alerts, and following detection
-- **Collection Sensors architecture**: Users configure hardware sensors in Settings, activate them from Dashboard to auto-discover nodes
-  - `collection_sensors` table with full CRUD API (`/api/sensors`) and Zod validation
-  - Sensor types: bluetooth, wifi, rfid, sdr, lora, meshtastic, adsb, sensor
-  - Connection methods: builtin, bluetooth, usb, serial, network
-  - Sensor statuses: idle, connecting, collecting, error, disconnected
-  - AddSensorDialog component for configuring new sensors
-  - Settings panel has sensor management section (add/view/delete sensors)
-  - Dashboard shows sensor activation buttons (replaces old BLE Scan / Add Device buttons)
-- **Passive Monitoring**: Simulated Wireshark-style passive scanning (no Web Bluetooth pairing dialogs)
-  - `ble-scanner.ts` with 250+ device templates across 8 signal types (BLE, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, Sensor)
-  - **OUI Database**: 130+ IEEE OUI prefix-to-manufacturer mappings for instant MAC-based manufacturer identification on first contact (before full device resolution)
-  - **Broad device categories**: Mobile phones, wearables, audio, medical (hearing aids, insulin pumps, CGMs), vehicle keys, smart home, industrial scanners, cameras, e-readers, IoT cameras, mesh routers, industrial WiFi APs, marine/aviation/amateur radio, RFID (passports, hospital wristbands, library tags), environmental sensors (radiation, air quality, soil moisture)
-  - **Progressive discovery**: nodes created immediately with MAC + RSSI, then name/manufacturer/type resolve on subsequent passes (like real scanners)
-  - **LoRa/Meshtastic short+long name resolution**: mesh nodes resolve short name (4-char callsign like "HV3N") first, then full long name (e.g., "Heltec V3 Node") on subsequent passes — matching real Meshtastic/Meshcore behavior
-  - **LoRa modalities**: Meshtastic, Meshcore, Helium, ChirpStack, LoRa P2P, LoRaWAN — all under `lora` signal type
-  - Each template has a `resolveDelay` controlling how many passes before full resolution
-  - Burst emissions: initial 3-6 device burst, then 1-4 per tick at ~1.5s intervals
-  - Dashboard `persistNode` creates nodes with partial data, then PATCHes when fields resolve
-  - Live signal feed shows "resolving" indicator for unresolved nodes, "GPS" tag for telemetry nodes
-  - **Telemetry Location Reconciliation**: LoRa, Meshtastic, ADS-B, and drone nodes use their broadcasted GPS telemetry position for observations, NOT the collection sensor's host location. Non-telemetry nodes (BLE, WiFi, RFID) fall back to the sensor host's browser geolocation.
-  - Each discovered node is persisted to DB with location auto-tagging (telemetry or sensor GPS)
-- **Device Associations (Multi-INT Intelligence Links)**:
-  - `device_associations` table with intelligence discipline-aligned association types
-  - **No type-based associations**: links are NOT made based on device/node type — only movement, triangulation, signal behavior, and temporal patterns
-  - Filtering by type, frequency, etc. is allowed in UI but does not drive association creation
-  - Association analyzer with **static collection bias filtering** — rejects false associations from single-location scanning
-  - Requires geographic diversity (2+ unique locations per device) for spatial associations
-  - **Intelligence Discipline Framework**:
-    - **GEOINT** (Geospatial Intelligence): Co-movement analysis, triangulated location fixes via multilateration
-    - **SIGINT** (Signals Intelligence): RSSI signal correlation with Fisher Z-transform, temporal activation synchronicity
-    - **MASINT** (Measurement & Signature Intelligence): RF emission signature correlation, frequency fingerprinting
-  - **GEOINT Triangulation**: Multilateration from multiple collection sensor positions using RSSI-derived distance estimates (log-distance path loss model), comparing triangulated fix convergence across time windows
-  - **Proper statistical output**: likelihood ratios, Bayesian posterior probability, confidence levels (almost_certain/highly_likely/likely/possible/unlikely), probability scales, p-values, hypothesis testing (H0/H1)
-  - Full CRUD API (`/api/associations`) plus automated analysis endpoint (`/api/associations/analyze`)
-  - DeviceDetail Links tab: each association shows intelligence discipline badge (GEOINT/SIGINT/MASINT), linked node name, confidence level, LR value; clicking opens detailed popup with discipline label, mini link diagram, statistical method, hypothesis test, probability bar, observation data
-- **Link Analysis Page** (/link-analysis) - Palantir-style force-directed graph visualization
-  - Canvas-based interactive graph with physics simulation (repulsion + spring forces)
-  - Drag nodes to rearrange, scroll to zoom, pan background
-  - Color-coded edges by association type, dashed lines for low confidence
-  - Node inspector panel showing device details and connected associations
-  - Legend overlay for association type colors
-- **Heat Map Visualization**:
-  - Leaflet.heat integration on World Map with toggle button
-  - Signal density visualization with RSSI-weighted intensity
-  - Gradient: dark blue (low) through cyan/green to yellow/red (high intensity)
-  - Zoom-dependent detail level (maxZoom: 17)
-- **Data Export/Import**:
-  - Full backup/restore of devices, observations, alerts, sensors, associations
-  - Version-tagged export format with device ID remapping on import
-  - MAC address deduplication during import
-- **Map (Meshtastic-style navigation)**:
-  - Location search via Nominatim geocoding + coordinate parsing (decimal, DMS, degrees/minutes)
-  - Fly-to with zoom on search result selection (zoom level 15)
-  - "Center on my location" button with GPS geolocation
-  - After centering, manual pan/drag does NOT auto-recenter - stays where user navigated
-  - Only re-centers on new search or my-location click (like Meshtastic/Meshcore)
-  - Pink markers for search results, cyan for user location, color-coded for signal types
-- **SIGINT Tools page** (/tools) with three integration tabs:
-  - **nmap**: Network scanning with ping/quick/port scan types, restricted to private networks
-  - **Meshtastic**: LoRa mesh device connectivity via HTTP API (port 4403)
-  - **SDR**: RTL-SDR spectrum scanning with frequency range input
-- **System Detection**: `/api/system/info` endpoint reports OS, arch, installed tools, network interfaces
-  - Settings panel dynamically shows installed tools (nmap, rtl_sdr, rtl_power, etc.)
-  - Host System section shows OS, architecture, CPU, memory, hostname
-- **Terminology**: UI uses "Nodes" for detected signals/devices, "Sensors" for collection hardware
-  - Internal data model still uses "devices" table for backward compatibility
-  - Sidebar shows "Node List", stats show "Total Nodes", etc.
-- Replit Auth with user profiles and tier system
-- Dark cyberpunk-themed UI with responsive design
-- Interactive world map with device markers via Leaflet
-- **Device Catalog with Broadcast Signatures**:
-  - DEVICE_BROADCAST_SIGNATURES database: comprehensive known broadcast names for each catalog item
-  - Pacemakers: 70+ known broadcast names (Medtronic Azure, Boston Scientific ACCOLADE, Abbott AVEIR, Biotronik Amvia, etc.)
-  - Medical devices: hearing aids (Phonak, Oticon, Signia, ReSound, Widex, Starkey), insulin pumps (Omnipod, Tandem, MiniMed), CGMs (Dexcom, FreeStyle Libre, Guardian), pulse oximeters, BP monitors
-  - All device categories have curated broadcast name lists for fast node searching
-  - Selecting a catalog item prepopulates search with all known broadcast signatures (OR matching)
-  - "Create Alert" button per catalog item to monitor for matching device detections
-  - Search page shows catalog-driven multi-term matching with signal type filtering
-- Counter-intelligence panel with following detection
-- Monitoring & alerts system
-- Seed data with realistic signal intelligence scenarios
-- AI-powered multi-INT intelligence analysis (OpenAI gpt-4o via Replit AI Integrations)
-  - Full-spectrum analysis: SIGINT, GEOINT, MASINT, OSINT, COMINT assessments per device
-  - OUI/MAC cross-referencing for chipset/manufacturer identification
-  - OSINT enrichment: CVE database, FCC ID lookups, manufacturer intelligence, known vulnerabilities
-  - Device association cross-referencing: linked devices, operator ecosystem profiling
-  - Behavioral pattern of life analysis and anomaly detection
-  - Threat assessment with risk classification (LOW/MEDIUM/HIGH/CRITICAL)
-- SIGINT Node Report page (/node-report/:id) - comprehensive intelligence dossier per node
-- Manual observation logging dialog with GPS auto-fill
-- Settings panel: sensor management, browser capabilities, system info, data mode, security, data management
-- Clear All Data feature to remove seed data and start fresh
-- Backend validation: createDeviceSchema, createObservationSchema, createSensorSchema (Zod) on POST routes
-
-## Architecture
-- **Frontend**: React + TypeScript, Tailwind CSS, Shadcn UI, Wouter routing, TanStack Query, Leaflet maps, Framer Motion animations
-- **Backend**: Express.js + TypeScript, PostgreSQL (Drizzle ORM), Replit Auth (OpenID Connect)
-- **Database**: PostgreSQL with tables: users, sessions, devices, observations, alerts, device_catalog, user_profiles, activity_log, following_detection, collection_sensors
-- **System Packages**: nmap (network scanning), rtl-sdr (software defined radio)
-- **NPM Packages**: @meshtastic/core, @meshtastic/transport-http (LoRa mesh networking)
-
-## Backend Services
-- `server/services/nmap-scanner.ts` - Safe nmap execution with input sanitization, private network restriction
-- `server/services/meshtastic-service.ts` - Meshtastic device connection management via HTTP API
-- `server/services/sdr-service.ts` - RTL-SDR tool detection, device listing, spectrum scanning
-- `server/services/system-info.ts` - OS detection, tool availability checking, network interface listing
-- `server/services/association-analyzer.ts` - SIGINT association detection with five algorithmic analyzers
-
-## Key Design Decisions
-- Cyberpunk/tech-movie dark theme with cyan (#00d4ff) primary color and purple accents
-- JetBrains Mono as the primary font for technical aesthetic
-- Signal types: bluetooth, wifi, rfid, sdr, lora, meshtastic, adsb, sensor
-- User tiers: free, basic, professional, enterprise, admin
-- Data modes: local, friends, public, osint
-- Map navigation: Meshtastic-style (no auto-recenter on pan, only on explicit search/location)
-- nmap restricted to private network ranges for safety
-
-## File Structure
-- `shared/schema.ts` - All Drizzle models and TypeScript types
-- `shared/models/auth.ts` - Replit Auth user/session schemas
-- `server/routes.ts` - API endpoints (devices, observations, alerts, sensors, associations, export/import, nmap, meshtastic, sdr, system)
-- `server/storage.ts` - Database storage layer (DatabaseStorage)
-- `server/seed.ts` - Sample data seeder
-- `server/db.ts` - Database connection
-- `server/services/` - Backend service modules (nmap, meshtastic, sdr, system-info)
-- `server/replit_integrations/auth/` - Authentication module
-- `client/src/App.tsx` - Main app with routing and sidebar layout
-- `client/src/pages/` - Dashboard, WorldMap, Devices, Search, Monitoring, CounterIntel, Catalog, Tools, LinkAnalysis, Settings, Landing, NodeReport
-- `client/src/components/` - Reusable components (AppSidebar, MapView, DeviceList, DeviceDetail, DeviceAnalysis, StatsBar, etc.)
-- `client/src/lib/signal-utils.ts` - Signal type definitions, utilities, device catalog data
-- `client/src/lib/ble-scanner.ts` - Passive scanning simulation and GPS geolocation
-- `client/src/components/add-sensor-dialog.tsx` - Sensor configuration dialog
-- `client/src/components/add-observation-dialog.tsx` - Manual observation logging dialog
+SIGINT Hub is a signal intelligence platform designed for collecting, analyzing, and triangulating various wireless signals, including Bluetooth, WiFi, RFID, SDR, and LoRa. It integrates geospatial mapping, multi-user collaboration, and AI-powered device analysis. The platform aims to serve search and rescue operations, law enforcement, military intelligence, and open-source intelligence hobbyists by providing comprehensive tools for understanding signal environments and tracking devices.
 
 ## User Preferences
 - Technical/movie-cool aesthetic preferred
@@ -145,3 +9,34 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - Comprehensive and fun
 - Multi-monitor support for higher resolutions
 - Meshtastic/Meshcore-style map navigation (no auto-recenter on manual pan)
+
+## System Architecture
+The platform is built with a React + TypeScript frontend utilizing Tailwind CSS, Shadcn UI, Wouter for routing, TanStack Query for data fetching, Leaflet for interactive maps, and Framer Motion for animations. The backend is an Express.js + TypeScript server with a PostgreSQL database (managed by Drizzle ORM) and Replit Auth for user management.
+
+**Key Features:**
+- **Collection Sensors:** Configurable hardware sensors (Bluetooth, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, environmental sensors) with various connection methods (builtin, bluetooth, usb, serial, network). Sensors activate from the Dashboard to auto-discover nodes.
+- **Passive Monitoring:** Simulated Wireshark-style scanning with 250+ device templates and an OUI database for manufacturer identification. Supports progressive discovery where nodes are created with partial data and updated as more information resolves. Telemetry-enabled nodes (LoRa, Meshtastic, ADS-B, drones) use broadcasted GPS for observations, while others use the sensor host's geolocation.
+- **Device Associations (Multi-INT Intelligence Links):** Automated analysis creates links between devices based on geospatial (co-movement, triangulation), signal (RSSI correlation, temporal activation), and measurement/signature intelligence (RF emission, frequency fingerprinting). Associations require geographic diversity for spatial analysis and provide statistical outputs like likelihood ratios and confidence levels.
+- **NodeLinkGraph Component:** A canvas-based force-directed graph for visualizing device associations, used in both individual Node Reports and a dedicated Link Analysis page.
+- **GEOINT Position Fix / Triangulation:** Calculates estimated latitude/longitude, error radius, and confidence for a single device using RSSI-weighted multilateration from multiple observations.
+- **Trusted Users & Data Modes:** Supports "Friends" mode for sharing data with trusted users and "Combined/All Sources" mode for aggregating data. "OSINT" mode provides configuration for 12 curated OSINT data sources and HUMINT linking guidance.
+- **OSINT Links / HUMINT Associations:** Manages associations between human identities/aliases and detected devices.
+- **Heat Map Visualization:** Integrates Leaflet.heat on the World Map to visualize signal density with RSSI-weighted intensity.
+- **Data Export/Import:** Full backup and restore functionality for devices, observations, alerts, sensors, and associations, with device ID remapping and MAC address deduplication.
+- **Map Navigation:** Meshtastic-style map interaction with location search (Nominatim geocoding), "center on my location" via GPS, and pink markers for search results.
+- **SIGINT Tools Page:** Integrates `nmap` for network scanning (restricted to private networks), `Meshtastic` for LoRa mesh device connectivity, and `SDR` for RTL-SDR spectrum scanning.
+- **System Detection:** `/api/system/info` endpoint provides host system information (OS, arch, CPU, memory, hostname) and dynamically lists installed SIGINT tools.
+- **Device Catalog with Broadcast Signatures:** A curated catalog of devices (e.g., pacemakers, medical devices) with known broadcast names for fast searching and alert creation.
+- **AI-powered Multi-INT Intelligence Analysis:** Leverages OpenAI's gpt-4o for comprehensive analysis covering SIGINT, GEOINT, MASINT, OSINT, and COMINT, including OUI/MAC cross-referencing, OSINT enrichment, behavioral pattern analysis, and threat assessment.
+- **SIGINT Node Report:** Comprehensive intelligence dossier for each detected node.
+- **UI/UX:** Dark cyberpunk-themed interface with cyan primary color, purple accents, and JetBrains Mono font. Responsive design with multi-monitor support.
+- **Terminology:** "Nodes" refers to detected signals/devices, "Sensors" to collection hardware.
+- **Backend Validation:** Zod schemas are used for input validation on POST routes (e.g., `createDeviceSchema`, `createObservationSchema`, `createSensorSchema`).
+
+## External Dependencies
+- **Database:** PostgreSQL
+- **Authentication:** Replit Auth (OpenID Connect)
+- **Mapping:** Leaflet, Nominatim (geocoding)
+- **AI/ML:** OpenAI (gpt-4o via Replit AI Integrations)
+- **System Tools:** nmap, rtl-sdr, rtl-power
+- **NPM Packages for Specific Hardware/Protocols:** @meshtastic/core, @meshtastic/transport-http

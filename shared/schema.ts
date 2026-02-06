@@ -28,7 +28,8 @@ export const dataModeEnum = pgEnum("data_mode", [
   "local",
   "friends",
   "public",
-  "osint"
+  "osint",
+  "combined"
 ]);
 
 export const userTierEnum = pgEnum("user_tier", [
@@ -207,6 +208,29 @@ export const observationsRelations = relations(observations, ({ one }) => ({
   }),
 }));
 
+export const trustedUsers = pgTable("trusted_users", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  trustedEmail: varchar("trusted_email").notNull(),
+  trustedAlias: varchar("trusted_alias"),
+  addedAt: timestamp("added_at").defaultNow(),
+});
+
+export const osintLinks = pgTable("osint_links", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  deviceId: integer("device_id").notNull(),
+  linkType: varchar("link_type").notNull(),
+  alias: varchar("alias"),
+  realName: varchar("real_name"),
+  source: varchar("source"),
+  sourceUrl: varchar("source_url"),
+  notes: text("notes"),
+  confidence: integer("confidence").default(50),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertDeviceSchema = createInsertSchema(devices).omit({ id: true, firstSeenAt: true, lastSeenAt: true });
 export const insertObservationSchema = createInsertSchema(observations).omit({ id: true, observedAt: true });
 export const insertAlertSchema = createInsertSchema(alerts).omit({ id: true, createdAt: true, triggeredAt: true });
@@ -233,3 +257,9 @@ export type CollectionSensor = typeof collectionSensors.$inferSelect;
 export type InsertCollectionSensor = z.infer<typeof insertCollectionSensorSchema>;
 export type DeviceAssociation = typeof deviceAssociations.$inferSelect;
 export type InsertDeviceAssociation = z.infer<typeof insertDeviceAssociationSchema>;
+export const insertTrustedUserSchema = createInsertSchema(trustedUsers).omit({ id: true, addedAt: true });
+export const insertOsintLinkSchema = createInsertSchema(osintLinks).omit({ id: true, createdAt: true });
+export type TrustedUser = typeof trustedUsers.$inferSelect;
+export type InsertTrustedUser = z.infer<typeof insertTrustedUserSchema>;
+export type OsintLink = typeof osintLinks.$inferSelect;
+export type InsertOsintLink = z.infer<typeof insertOsintLinkSchema>;

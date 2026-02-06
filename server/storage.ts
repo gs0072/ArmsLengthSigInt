@@ -1,5 +1,5 @@
 import {
-  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations,
+  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations, trustedUsers, osintLinks,
   type User, type UpsertUser,
   type Device, type InsertDevice,
   type Observation, type InsertObservation,
@@ -10,6 +10,8 @@ import {
   type FollowingDetectionEntry,
   type CollectionSensor, type InsertCollectionSensor,
   type DeviceAssociation, type InsertDeviceAssociation,
+  type TrustedUser, type InsertTrustedUser,
+  type OsintLink, type InsertOsintLink,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
@@ -58,6 +60,15 @@ export interface IStorage {
   createAssociation(assoc: InsertDeviceAssociation): Promise<DeviceAssociation>;
   updateAssociation(id: number, updates: Partial<InsertDeviceAssociation>): Promise<DeviceAssociation | undefined>;
   deleteAssociation(id: number): Promise<void>;
+
+  getTrustedUsers(userId: string): Promise<TrustedUser[]>;
+  createTrustedUser(tu: InsertTrustedUser): Promise<TrustedUser>;
+  deleteTrustedUser(id: number): Promise<void>;
+
+  getOsintLinks(userId: string, deviceId?: number): Promise<OsintLink[]>;
+  createOsintLink(link: InsertOsintLink): Promise<OsintLink>;
+  updateOsintLink(id: number, updates: Partial<InsertOsintLink>): Promise<OsintLink | undefined>;
+  deleteOsintLink(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -248,6 +259,40 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAssociation(id: number): Promise<void> {
     await db.delete(deviceAssociations).where(eq(deviceAssociations.id, id));
+  }
+
+  async getTrustedUsers(userId: string): Promise<TrustedUser[]> {
+    return db.select().from(trustedUsers).where(eq(trustedUsers.userId, userId));
+  }
+
+  async createTrustedUser(tu: InsertTrustedUser): Promise<TrustedUser> {
+    const [created] = await db.insert(trustedUsers).values(tu).returning();
+    return created;
+  }
+
+  async deleteTrustedUser(id: number): Promise<void> {
+    await db.delete(trustedUsers).where(eq(trustedUsers.id, id));
+  }
+
+  async getOsintLinks(userId: string, deviceId?: number): Promise<OsintLink[]> {
+    if (deviceId) {
+      return db.select().from(osintLinks).where(and(eq(osintLinks.userId, userId), eq(osintLinks.deviceId, deviceId)));
+    }
+    return db.select().from(osintLinks).where(eq(osintLinks.userId, userId));
+  }
+
+  async createOsintLink(link: InsertOsintLink): Promise<OsintLink> {
+    const [created] = await db.insert(osintLinks).values(link).returning();
+    return created;
+  }
+
+  async updateOsintLink(id: number, updates: Partial<InsertOsintLink>): Promise<OsintLink | undefined> {
+    const [updated] = await db.update(osintLinks).set(updates).where(eq(osintLinks.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async deleteOsintLink(id: number): Promise<void> {
+    await db.delete(osintLinks).where(eq(osintLinks.id, id));
   }
 }
 

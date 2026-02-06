@@ -9,10 +9,10 @@ import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickS
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
-import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS } from "./services/association-analyzer";
+import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
 
 const updateProfileSchema = z.object({
-  dataMode: z.enum(["local", "friends", "public", "osint"]).optional(),
+  dataMode: z.enum(["local", "friends", "public", "osint", "combined"]).optional(),
   settings: z.record(z.unknown()).optional(),
 });
 
@@ -430,6 +430,26 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error clearing data:", error);
       res.status(500).json({ message: "Failed to clear data" });
+    }
+  });
+
+  app.get("/api/devices/:id/triangulate", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const deviceId = parseInt(req.params.id);
+      const device = await storage.getDevice(deviceId);
+      if (!device || device.userId !== userId) {
+        return res.status(404).json({ message: "Device not found" });
+      }
+      const observations = await storage.getObservations(userId);
+      const deviceObs = observations.filter(o => o.deviceId === deviceId);
+      const result = triangulateDevice(deviceObs);
+      if (!result) {
+        return res.json({ success: false, message: "Insufficient observation data for triangulation (need 2+ observations with location and signal strength)" });
+      }
+      res.json({ success: true, triangulation: result });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
     }
   });
 
@@ -1030,6 +1050,88 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     } catch (error) {
       console.error("Error importing data:", error);
       res.status(500).json({ message: "Import failed" });
+    }
+  });
+
+  app.get("/api/trusted-users", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const trusted = await storage.getTrustedUsers(userId);
+      res.json(trusted);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/trusted-users", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { email, alias } = req.body;
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        return res.status(400).json({ message: "Valid email address required" });
+      }
+      const trusted = await storage.createTrustedUser({
+        userId,
+        trustedEmail: email.trim().toLowerCase(),
+        trustedAlias: alias || null,
+      });
+      res.json(trusted);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/trusted-users/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteTrustedUser(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/osint-links", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const deviceId = req.query.deviceId ? parseInt(req.query.deviceId as string) : undefined;
+      const links = await storage.getOsintLinks(userId, deviceId);
+      res.json(links);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/osint-links", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { deviceId, linkType, alias, realName, source, sourceUrl, notes, confidence, metadata } = req.body;
+      if (!deviceId || !linkType) {
+        return res.status(400).json({ message: "deviceId and linkType are required" });
+      }
+      const link = await storage.createOsintLink({
+        userId,
+        deviceId,
+        linkType,
+        alias: alias || null,
+        realName: realName || null,
+        source: source || null,
+        sourceUrl: sourceUrl || null,
+        notes: notes || null,
+        confidence: confidence || 50,
+        metadata: metadata || null,
+      });
+      res.json(link);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/osint-links/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteOsintLink(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
     }
   });
 

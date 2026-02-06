@@ -778,3 +778,106 @@ export const ASSOCIATION_DISCIPLINE: Record<string, IntelDiscipline> = {
   geoint_triangulation: "GEOINT",
   manual: "MULTI_INT",
 };
+
+export interface TriangulationResult {
+  estimatedLat: number;
+  estimatedLon: number;
+  errorRadiusM: number;
+  confidence: number;
+  sensorPositions: number;
+  observationsUsed: number;
+  method: string;
+  rangeEstimates: Array<{
+    sensorLat: number;
+    sensorLon: number;
+    rssi: number;
+    estimatedDistanceM: number;
+    bearing: number;
+    timestamp: string;
+  }>;
+}
+
+export function triangulateDevice(observations: Observation[]): TriangulationResult | null {
+  const withLocation = observations.filter(o => o.latitude && o.longitude && o.signalStrength);
+  if (withLocation.length < 2) return null;
+
+  const sensorObs = withLocation.map(o => ({
+    lat: o.latitude!,
+    lon: o.longitude!,
+    rssi: o.signalStrength!,
+    time: new Date(o.observedAt!).getTime(),
+  }));
+
+  const uniquePositions = new Map<string, typeof sensorObs[0]>();
+  for (const so of sensorObs) {
+    const key = `${so.lat.toFixed(4)},${so.lon.toFixed(4)}`;
+    const existing = uniquePositions.get(key);
+    if (!existing || so.time > existing.time) {
+      uniquePositions.set(key, so);
+    }
+  }
+
+  const positions = Array.from(uniquePositions.values());
+  if (positions.length < 2) {
+    const fix = triangulateFix(sensorObs);
+    if (!fix) return null;
+    const rangeEstimates = sensorObs.slice(0, 20).map(so => ({
+      sensorLat: so.lat,
+      sensorLon: so.lon,
+      rssi: so.rssi,
+      estimatedDistanceM: rssiToDistanceEstimate(so.rssi),
+      bearing: calculateBearing(so.lat, so.lon, fix.lat, fix.lon),
+      timestamp: new Date(so.time).toISOString(),
+    }));
+    return {
+      estimatedLat: fix.lat,
+      estimatedLon: fix.lon,
+      errorRadiusM: fix.errorRadiusM,
+      confidence: Math.min(90, 30 + positions.length * 10),
+      sensorPositions: positions.length,
+      observationsUsed: sensorObs.length,
+      method: "RSSI-weighted centroid (single position cluster)",
+      rangeEstimates,
+    };
+  }
+
+  const fix = triangulateFix(positions);
+  if (!fix) return null;
+
+  const distances = positions.map(p =>
+    haversineDistance(fix.lat, fix.lon, p.lat, p.lon) * 1000
+  );
+  const avgResidual = distances.reduce((a, b) => a + b, 0) / distances.length;
+
+  const confidence = Math.min(95, Math.max(20,
+    30 + positions.length * 12 - Math.min(30, avgResidual / 10)
+  ));
+
+  const rangeEstimates = positions.slice(0, 20).map(so => ({
+    sensorLat: so.lat,
+    sensorLon: so.lon,
+    rssi: so.rssi,
+    estimatedDistanceM: rssiToDistanceEstimate(so.rssi),
+    bearing: calculateBearing(so.lat, so.lon, fix.lat, fix.lon),
+    timestamp: new Date(so.time).toISOString(),
+  }));
+
+  return {
+    estimatedLat: fix.lat,
+    estimatedLon: fix.lon,
+    errorRadiusM: fix.errorRadiusM,
+    confidence,
+    sensorPositions: positions.length,
+    observationsUsed: sensorObs.length,
+    method: `GEOINT multilateration (${positions.length} sensor positions, log-distance path loss RSSI ranging)`,
+    rangeEstimates,
+  };
+}
+
+function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+    Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+}
