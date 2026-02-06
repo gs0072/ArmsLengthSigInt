@@ -7,8 +7,9 @@ import { SignalBadge, SignalStrengthBar } from "./signal-badge";
 import { GlowLine } from "./scan-animation";
 import {
   X, Eye, EyeOff, Flag, MapPin, Clock, Radio, Link2,
-  FileText, AlertTriangle, Globe, Fingerprint, Copy, ExternalLink
+  FileText, AlertTriangle, Globe, Fingerprint, Copy, ExternalLink, Brain
 } from "lucide-react";
+import { useLocation } from "wouter";
 import type { Device, Observation } from "@shared/schema";
 import { timeAgo, formatCoordinates, formatFrequency, getSignalLabel } from "@/lib/signal-utils";
 
@@ -21,6 +22,7 @@ interface DeviceDetailProps {
 }
 
 export function DeviceDetail({ device, observations, onClose, onToggleTrack, onToggleFlag }: DeviceDetailProps) {
+  const [, setLocation] = useLocation();
   const deviceObs = observations
     .filter(o => o.deviceId === device.id)
     .sort((a, b) => new Date(b.observedAt!).getTime() - new Date(a.observedAt!).getTime());
@@ -42,6 +44,15 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
           </p>
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setLocation(`/node-report/${device.id}`)}
+            data-testid="button-node-report"
+            title="Full SIGINT Node Report"
+          >
+            <Brain className="w-4 h-4 text-primary" />
+          </Button>
           <Button
             size="icon"
             variant="ghost"

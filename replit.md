@@ -12,6 +12,8 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - Counter-intelligence panel with following detection
 - Monitoring & alerts system
 - Seed data with realistic signal intelligence scenarios
+- AI-powered device analysis (OpenAI gpt-4o via Replit AI Integrations)
+- SIGINT Node Report page (/node-report/:id) - comprehensive intelligence dossier per device
 
 ## Architecture
 - **Frontend**: React + TypeScript, Tailwind CSS, Shadcn UI, Wouter routing, TanStack Query, Leaflet maps, Framer Motion animations
@@ -49,8 +51,8 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - `server/db.ts` - Database connection
 - `server/replit_integrations/auth/` - Authentication module
 - `client/src/App.tsx` - Main app with routing and sidebar layout
-- `client/src/pages/` - Dashboard, WorldMap, Devices, Search, Monitoring, CounterIntel, Catalog, Settings, Landing
-- `client/src/components/` - Reusable components (AppSidebar, MapView, DeviceList, DeviceDetail, StatsBar, etc.)
+- `client/src/pages/` - Dashboard, WorldMap, Devices, Search, Monitoring, CounterIntel, Catalog, Settings, Landing, NodeReport
+- `client/src/components/` - Reusable components (AppSidebar, MapView, DeviceList, DeviceDetail, DeviceAnalysis, StatsBar, etc.)
 - `client/src/lib/signal-utils.ts` - Signal type definitions, utilities, device catalog data
 
 ## User Preferences

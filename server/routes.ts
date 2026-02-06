@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { seedDatabase } from "./seed";
 import { z } from "zod";
+import OpenAI from "openai";
 
 const updateProfileSchema = z.object({
   dataMode: z.enum(["local", "friends", "public", "osint"]).optional(),
@@ -284,6 +285,118 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching following detection:", error);
       res.status(500).json({ message: "Failed to fetch following detection data" });
+    }
+  });
+
+  app.post("/api/devices/:id/analyze", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const deviceId = parseInt(req.params.id);
+      const device = await storage.getDevice(deviceId);
+      if (!device || device.userId !== userId) {
+        return res.status(404).json({ message: "Device not found" });
+      }
+      const observations = await storage.getObservations(userId);
+      const deviceObs = observations
+        .filter(o => o.deviceId === deviceId)
+        .sort((a, b) => new Date(b.observedAt!).getTime() - new Date(a.observedAt!).getTime());
+
+      const deviceData = {
+        name: device.name,
+        macAddress: device.macAddress,
+        uuid: device.uuid,
+        manufacturer: device.manufacturer,
+        model: device.model,
+        deviceType: device.deviceType,
+        signalType: device.signalType,
+        firstSeen: device.firstSeenAt,
+        lastSeen: device.lastSeenAt,
+        isTracked: device.isTracked,
+        isFlagged: device.isFlagged,
+        notes: device.notes,
+        metadata: device.metadata,
+        observationCount: deviceObs.length,
+        observations: deviceObs.slice(0, 20).map(o => ({
+          timestamp: o.observedAt,
+          signalStrength: o.signalStrength,
+          frequency: o.frequency,
+          latitude: o.latitude,
+          longitude: o.longitude,
+          altitude: o.altitude,
+          channel: o.channel,
+          protocol: o.protocol,
+          encryption: o.encryption,
+          rawData: o.rawData?.substring(0, 100),
+          hexData: o.hexData?.substring(0, 100),
+        })),
+      };
+
+      const openai = new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const stream = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: `You are SIGINT Hub's AI intelligence analyst. Generate a comprehensive intelligence report about a detected device/signal based on the provided data. Your report should be thorough, technical, and actionable.
+
+Structure your report with these sections using markdown headers:
+## Device Identification
+Identify the device type, manufacturer details, known product lines, and any identifiers (MAC OUI lookup, UUID analysis).
+
+## Signal Analysis
+Analyze the signal characteristics - frequency bands, protocols, encryption, signal strength patterns, and what they reveal about the device.
+
+## Geospatial Intelligence
+Analyze location data - movement patterns, area of operation, known locations near coordinates, and any patterns in the GPS data.
+
+## Threat Assessment
+Evaluate potential security implications - is this a known surveillance device? Tracking device? Could it be used maliciously? What is the risk level (Low/Medium/High/Critical)?
+
+## OSINT Findings
+Based on the device identifiers (MAC address, manufacturer, model), provide what is publicly known - product specs, known vulnerabilities, common uses, any CVEs, regulatory filings (FCC ID lookups), and relevant public information.
+
+## Behavioral Profile
+Analyze observation patterns - timing patterns, frequency of appearance, movement characteristics, and what this suggests about the device operator.
+
+## Recommendations
+Provide actionable next steps for the analyst - what to monitor, potential countermeasures, and additional data collection suggestions.
+
+Be specific, technical, and provide real-world context. If the MAC address is available, discuss the OUI (manufacturer prefix). If coordinates are available, describe the general area. Use technical SIGINT terminology appropriately.`
+          },
+          {
+            role: "user",
+            content: `Analyze this device and generate a full intelligence report:\n\n${JSON.stringify(deviceData, null, 2)}`
+          }
+        ],
+        stream: true,
+        max_tokens: 4096,
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } catch (error) {
+      console.error("Error analyzing device:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: "Analysis failed" })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ message: "Failed to analyze device" });
+      }
     }
   });
 
