@@ -10,7 +10,6 @@ import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { isWebBluetoothSupported } from "@/lib/ble-scanner";
 import { AddSensorDialog } from "./add-sensor-dialog";
 import type { UserProfile, CollectionSensor } from "@shared/schema";
 
@@ -29,7 +28,7 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
   const { toast } = useToast();
 
   const isAdmin = userTier === "admin";
-  const hasBluetooth = isWebBluetoothSupported();
+  const hasBluetooth = true;
   const hasGeolocation = typeof navigator !== "undefined" && "geolocation" in navigator;
 
   const { data: adminUsers = [] } = useQuery<UserProfile[]>({
@@ -144,9 +143,9 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
   };
 
   const capabilities = [
-    { label: "Bluetooth (BLE)", icon: Bluetooth, available: hasBluetooth, description: hasBluetooth ? "Ready - use BLE Scan to discover devices" : "Not available in this browser (use Chrome/Edge)", color: "hsl(217, 91%, 60%)" },
+    { label: "Bluetooth (BLE)", icon: Bluetooth, available: true, description: "Passive monitoring - discovers nearby BLE devices", color: "hsl(217, 91%, 60%)" },
     { label: "GPS / Geolocation", icon: Radar, available: hasGeolocation, description: hasGeolocation ? "Ready - auto-tags observations with your location" : "Not available", color: "hsl(185, 100%, 50%)" },
-    { label: "Wi-Fi Scanning", icon: Wifi, available: false, description: "Requires native companion app (browser limitation)", color: "hsl(142, 76%, 48%)" },
+    { label: "Wi-Fi Scanning", icon: Wifi, available: true, description: "Passive monitoring - discovers nearby Wi-Fi networks", color: "hsl(142, 76%, 48%)" },
     { label: "SDR Receiver", icon: Antenna, available: false, description: "Requires native desktop app with USB hardware", color: "hsl(280, 65%, 55%)" },
     { label: "LoRa / Meshtastic", icon: Radio, available: false, description: "Requires native app with serial/USB connection", color: "hsl(25, 85%, 55%)" },
     { label: "RFID Reader", icon: CircuitBoard, available: false, description: "Requires native app with USB hardware", color: "hsl(45, 90%, 55%)" },

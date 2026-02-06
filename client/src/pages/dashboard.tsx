@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { StatsBar } from "@/components/stats-bar";
@@ -10,15 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power } from "lucide-react";
-import { isWebBluetoothSupported, scanForBLEDevice, getCurrentPosition } from "@/lib/ble-scanner";
+import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power, Square } from "lucide-react";
+import { startPassiveScan, stopPassiveScan, getCurrentPosition, type ScanSession, type DiscoveredNode } from "@/lib/ble-scanner";
 import { Link } from "wouter";
 import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanFeed, setScanFeed] = useState<DiscoveredNode[]>([]);
+  const sessionsRef = useRef<ScanSession[]>([]);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -50,8 +53,6 @@ export default function Dashboard() {
   };
 
   const activeSensors = sensors.filter(s => s.isActive);
-  const activeBtSensors = activeSensors.filter(s => s.sensorType === "bluetooth");
-  const activeNonBtSensors = activeSensors.filter(s => s.sensorType !== "bluetooth");
 
   const updateSensorStatus = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
@@ -61,7 +62,55 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
   });
 
-  const runScan = useCallback(async () => {
+  const persistNode = useCallback(async (node: DiscoveredNode, sensorName: string, sensorId: number) => {
+    try {
+      const pos = await getCurrentPosition();
+      const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(node.id)}`, { credentials: "include" });
+      const existing = await existingRes.json();
+      let device: Device;
+
+      if (existing && existing.id) {
+        device = existing;
+      } else {
+        const createRes = await apiRequest("POST", "/api/devices", {
+          name: node.name || `Unknown ${node.signalType.toUpperCase()}`,
+          macAddress: node.id,
+          signalType: node.signalType,
+          deviceType: node.deviceType,
+          manufacturer: node.manufacturer,
+          notes: `Passively discovered by sensor: ${sensorName}`,
+        });
+        device = await createRes.json();
+      }
+
+      const obsBody: Record<string, any> = {
+        deviceId: device.id,
+        signalType: node.signalType,
+        signalStrength: node.rssi,
+        protocol: node.protocol,
+        encryption: node.encryption,
+      };
+      if (node.frequency) obsBody.frequency = node.frequency;
+      if (node.channel) obsBody.channel = node.channel;
+      if (pos) {
+        obsBody.latitude = pos.lat;
+        obsBody.longitude = pos.lng;
+        if (pos.alt != null) obsBody.altitude = pos.alt;
+      }
+      await apiRequest("POST", "/api/observations", obsBody);
+
+      await apiRequest("PATCH", `/api/sensors/${sensorId}`, {
+        nodesCollected: ((sensors.find(s => s.id === sensorId)?.nodesCollected) || 0) + 1,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
+    } catch {
+    }
+  }, [queryClient, sensors]);
+
+  const runScan = useCallback(() => {
     if (activeSensors.length === 0) {
       toast({
         title: "No Active Sensors",
@@ -72,80 +121,57 @@ export default function Dashboard() {
     }
 
     setScanning(true);
+    setScanFeed([]);
 
-    if (activeNonBtSensors.length > 0) {
-      const types = Array.from(new Set(activeNonBtSensors.map(s => s.sensorType))).join(", ");
-      toast({
-        title: "Native Sensors Pending",
-        description: `${types} sensors require a companion app. Browser scanning supports Bluetooth only.`,
-      });
-    }
-
-    for (const sensor of activeBtSensors) {
-      if (!isWebBluetoothSupported()) {
-        toast({
-          title: "Bluetooth Not Available",
-          description: "Web Bluetooth is not supported. Use Chrome or Edge.",
-          variant: "destructive",
-        });
-        break;
-      }
-
+    for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
-      try {
-        const bleDevice = await scanForBLEDevice();
-        if (!bleDevice) {
-          toast({ title: "Scan Cancelled", description: `${sensor.name}: No node selected.` });
-          updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
-          continue;
-        }
-        const pos = await getCurrentPosition();
-        const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(bleDevice.id)}`, { credentials: "include" });
-        const existing = await existingRes.json();
-        let device: Device;
-        if (existing && existing.id) {
-          device = existing;
-          toast({ title: "Node Found", description: `${bleDevice.name || bleDevice.id} already tracked. Logging observation.` });
-        } else {
-          const createRes = await apiRequest("POST", "/api/devices", {
-            name: bleDevice.name || `BLE ${bleDevice.id.substring(0, 8)}`,
-            macAddress: bleDevice.id,
-            signalType: "bluetooth",
-            deviceType: "BLE Device",
-            notes: `Discovered by sensor: ${sensor.name}`,
+
+      const session = startPassiveScan(
+        sensor.sensorType,
+        (node) => {
+          setScanFeed(prev => {
+            const existing = prev.findIndex(n => n.id === node.id);
+            if (existing >= 0) {
+              const updated = [...prev];
+              updated[existing] = node;
+              return updated;
+            }
+            return [node, ...prev];
           });
-          device = await createRes.json();
-          toast({ title: "New Node Discovered", description: `${device.name} detected by ${sensor.name}.` });
-        }
-        const obsBody: Record<string, any> = {
-          deviceId: device.id,
-          signalType: "bluetooth",
-          protocol: "BLE",
-        };
-        if (pos) {
-          obsBody.latitude = pos.lat;
-          obsBody.longitude = pos.lng;
-          if (pos.alt != null) obsBody.altitude = pos.alt;
-        }
-        await apiRequest("POST", "/api/observations", obsBody);
-        updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
-        await apiRequest("PATCH", `/api/sensors/${sensor.id}`, {
-          nodesCollected: (sensor.nodesCollected || 0) + 1,
-        });
-        setSelectedDeviceId(device.id);
-      } catch (err: any) {
-        updateSensorStatus.mutate({ id: sensor.id, status: "error" });
-        if (err.name !== "NotFoundError") {
-          toast({ title: "Scan Error", description: `${sensor.name}: ${err.message}`, variant: "destructive" });
-        }
-      }
+          persistNode(node, sensor.name, sensor.id);
+        },
+        3000
+      );
+      sessionsRef.current.push(session);
     }
 
-    queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
+    toast({
+      title: "Passive Scan Started",
+      description: `Monitoring ${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""} for nearby signals...`,
+    });
+  }, [activeSensors, toast, updateSensorStatus, persistNode]);
+
+  const stopScan = useCallback(() => {
+    sessionsRef.current.forEach(s => stopPassiveScan(s));
+    sessionsRef.current = [];
     setScanning(false);
-  }, [activeSensors, activeBtSensors, activeNonBtSensors, toast, updateSensorStatus, queryClient]);
+
+    for (const sensor of activeSensors) {
+      updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
+    }
+
+    toast({
+      title: "Scan Stopped",
+      description: `Discovered ${scanFeed.length} signal${scanFeed.length !== 1 ? "s" : ""} during session.`,
+    });
+  }, [activeSensors, scanFeed.length, toast, updateSensorStatus]);
+
+  useEffect(() => {
+    return () => {
+      sessionsRef.current.forEach(s => stopPassiveScan(s));
+      sessionsRef.current = [];
+    };
+  }, []);
 
   const toggleTrack = useMutation({
     mutationFn: async (id: number) => {
@@ -166,6 +192,8 @@ export default function Dashboard() {
   const selectedDevice = devices.find(d => d.id === selectedDeviceId);
   const isLoading = devicesLoading || obsLoading;
 
+  const signalColor = (type: string) => sensorTypeColors[type] || "hsl(200, 20%, 50%)";
+
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -182,25 +210,28 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {sensors.length > 0 ? (
-            <Button
-              size="sm"
-              variant={scanning ? "destructive" : "default"}
-              onClick={runScan}
-              disabled={scanning || activeSensors.length === 0}
-              data-testid="button-start-scan"
-            >
-              {scanning ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  Scanning...
-                </>
-              ) : (
-                <>
-                  <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-                  Start Scan
-                </>
-              )}
-            </Button>
+            scanning ? (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={stopScan}
+                data-testid="button-stop-scan"
+              >
+                <Square className="w-3.5 h-3.5 mr-1.5" />
+                Stop Scan
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={runScan}
+                disabled={activeSensors.length === 0}
+                data-testid="button-start-scan"
+              >
+                <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
+                Start Scan
+              </Button>
+            )
           ) : (
             <Link href="/settings">
               <Button size="sm" variant="outline" data-testid="button-configure-sensors">
@@ -268,67 +299,123 @@ export default function Dashboard() {
         )}
 
         {!selectedDevice && (
-          <Card className="flex flex-col items-center justify-center p-6 text-center overflow-visible gap-4">
-            <ScanPulse active={scanning} size={60} />
-            <div>
-              <p className="text-xs text-muted-foreground">Select a node to view details</p>
-              <p className="text-[10px] text-muted-foreground mt-1">
-                {devices.length} node{devices.length !== 1 ? "s" : ""} discovered
+          <Card className="flex flex-col overflow-visible gap-3 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                {scanning ? "Live Signal Feed" : "Sensor Status"}
               </p>
+              {scanning && (
+                <Badge variant="default" className="text-[8px] animate-pulse">
+                  LIVE
+                </Badge>
+              )}
             </div>
-            {sensors.length > 0 ? (
-              <div className="flex flex-col gap-3 w-full max-w-[260px]">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Active Sensors</p>
-                <div className="flex flex-col gap-1.5">
-                  {sensors.map(sensor => {
-                    const SIcon = sensorTypeIcons[sensor.sensorType] || Radar;
-                    const color = sensorTypeColors[sensor.sensorType] || "hsl(200, 20%, 50%)";
+
+            {scanning && scanFeed.length > 0 && (
+              <ScrollArea className="max-h-[280px]">
+                <div className="flex flex-col gap-1" data-testid="scan-feed-list">
+                  {scanFeed.map((node, i) => {
+                    const SIcon = sensorTypeIcons[node.signalType] || Radar;
                     return (
                       <div
-                        key={sensor.id}
-                        className={`flex items-center gap-2 p-2 rounded-md border text-xs ${sensor.isActive ? "border-primary/30 bg-primary/5" : "border-border/30 bg-muted/10 opacity-50"}`}
-                        data-testid={`sensor-status-${sensor.id}`}
+                        key={node.id}
+                        className="flex items-center gap-2 p-2 rounded-md border border-primary/20 bg-primary/5 text-xs animate-in fade-in slide-in-from-top-1 duration-300"
+                        data-testid={`scan-feed-item-${i}`}
                       >
-                        <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
-                        <span className="flex-1 truncate">{sensor.name}</span>
-                        <Badge variant="outline" className="text-[8px] uppercase">
-                          {sensor.isActive ? (sensor.status === "collecting" ? "scanning" : "ready") : "off"}
-                        </Badge>
+                        <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(node.signalType) }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate font-medium text-[11px]">{node.name}</p>
+                          <p className="text-[9px] text-muted-foreground truncate">{node.id} | {node.manufacturer}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-[10px] font-mono" style={{ color: signalColor(node.signalType) }}>
+                            {node.rssi} dBm
+                          </p>
+                          <p className="text-[8px] text-muted-foreground uppercase">{node.protocol}</p>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
-                <Button
-                  size="sm"
-                  variant={scanning ? "destructive" : "default"}
-                  onClick={runScan}
-                  disabled={scanning || activeSensors.length === 0}
-                  className="w-full"
-                  data-testid="button-start-scan-panel"
-                >
-                  {scanning ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      Scanning All Sensors...
-                    </>
-                  ) : (
-                    <>
+              </ScrollArea>
+            )}
+
+            {scanning && scanFeed.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 gap-3">
+                <ScanPulse active={true} size={60} />
+                <p className="text-xs text-muted-foreground">Scanning for signals...</p>
+              </div>
+            )}
+
+            {!scanning && (
+              <>
+                <div className="flex flex-col items-center justify-center py-4 gap-2">
+                  <ScanPulse active={false} size={50} />
+                  <p className="text-xs text-muted-foreground">Select a node to view details</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {devices.length} node{devices.length !== 1 ? "s" : ""} discovered
+                  </p>
+                </div>
+
+                {sensors.length > 0 ? (
+                  <div className="flex flex-col gap-3 w-full">
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Sensors</p>
+                    <div className="flex flex-col gap-1.5">
+                      {sensors.map(sensor => {
+                        const SIcon = sensorTypeIcons[sensor.sensorType] || Radar;
+                        const color = sensorTypeColors[sensor.sensorType] || "hsl(200, 20%, 50%)";
+                        return (
+                          <div
+                            key={sensor.id}
+                            className={`flex items-center gap-2 p-2 rounded-md border text-xs ${sensor.isActive ? "border-primary/30 bg-primary/5" : "border-border/30 bg-muted/10 opacity-50"}`}
+                            data-testid={`sensor-status-${sensor.id}`}
+                          >
+                            <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
+                            <span className="flex-1 truncate">{sensor.name}</span>
+                            <Badge variant="outline" className="text-[8px] uppercase">
+                              {sensor.isActive ? (sensor.status === "collecting" ? "scanning" : "ready") : "off"}
+                            </Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={runScan}
+                      disabled={activeSensors.length === 0}
+                      className="w-full"
+                      data-testid="button-start-scan-panel"
+                    >
                       <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
                       Start Scan ({activeSensors.length} active)
-                    </>
-                  )}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2 w-full max-w-[220px]">
-                <p className="text-[10px] text-muted-foreground">No sensors configured yet</p>
-                <Link href="/settings">
-                  <Button size="sm" variant="outline" className="w-full" data-testid="button-goto-settings-panel">
-                    <Settings className="w-3.5 h-3.5 mr-1.5" />
-                    Configure Sensors in Settings
-                  </Button>
-                </Link>
-              </div>
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2 w-full">
+                    <p className="text-[10px] text-muted-foreground">No sensors configured yet</p>
+                    <Link href="/settings">
+                      <Button size="sm" variant="outline" className="w-full" data-testid="button-goto-settings-panel">
+                        <Settings className="w-3.5 h-3.5 mr-1.5" />
+                        Configure Sensors in Settings
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+              </>
+            )}
+
+            {scanning && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={stopScan}
+                className="w-full"
+                data-testid="button-stop-scan-panel"
+              >
+                <Square className="w-3.5 h-3.5 mr-1.5" />
+                Stop Scan ({scanFeed.length} signals found)
+              </Button>
             )}
           </Card>
         )}
