@@ -43,6 +43,9 @@ export interface IStorage {
   upsertUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
   countUserProfiles(): Promise<number>;
   getAllUserProfiles(): Promise<UserProfile[]>;
+  getAdminUserList(): Promise<any[]>;
+  getActivityLog(userId: string, limit?: number): Promise<ActivityLogEntry[]>;
+  getAllActivityLog(limit?: number): Promise<ActivityLogEntry[]>;
 
   logActivity(userId: string, action: string, details?: string, ipAddress?: string): Promise<void>;
 
@@ -196,6 +199,56 @@ export class DatabaseStorage implements IStorage {
 
   async getAllUserProfiles(): Promise<UserProfile[]> {
     return db.select().from(userProfiles);
+  }
+
+  async getAdminUserList(): Promise<any[]> {
+    const allProfiles = await db.select().from(userProfiles);
+    const allUsers = await db.select().from(users);
+    const deviceCounts = await db.select({
+      userId: devices.userId,
+      count: sql<number>`count(*)::int`,
+    }).from(devices).groupBy(devices.userId);
+    const sensorCounts = await db.select({
+      userId: collectionSensors.userId,
+      count: sql<number>`count(*)::int`,
+    }).from(collectionSensors).groupBy(collectionSensors.userId);
+    const lastActivity = await db.select({
+      userId: activityLog.userId,
+      lastActive: sql<string>`max(timestamp)`,
+    }).from(activityLog).groupBy(activityLog.userId);
+
+    const userMap = new Map(allUsers.map(u => [u.id, u]));
+    const deviceMap = new Map(deviceCounts.map(d => [d.userId, d.count]));
+    const sensorMap = new Map(sensorCounts.map(s => [s.userId, s.count]));
+    const activityMap = new Map(lastActivity.map(a => [a.userId, a.lastActive]));
+
+    return allProfiles.map(p => {
+      const user = userMap.get(p.userId);
+      return {
+        ...p,
+        email: user?.email || null,
+        firstName: user?.firstName || null,
+        lastName: user?.lastName || null,
+        profileImageUrl: user?.profileImageUrl || null,
+        createdAt: user?.createdAt || null,
+        deviceCount: deviceMap.get(p.userId) || 0,
+        sensorCount: sensorMap.get(p.userId) || 0,
+        lastActive: activityMap.get(p.userId) || user?.createdAt || null,
+      };
+    });
+  }
+
+  async getActivityLog(userId: string, limit: number = 50): Promise<ActivityLogEntry[]> {
+    return db.select().from(activityLog)
+      .where(eq(activityLog.userId, userId))
+      .orderBy(desc(activityLog.timestamp))
+      .limit(limit);
+  }
+
+  async getAllActivityLog(limit: number = 100): Promise<ActivityLogEntry[]> {
+    return db.select().from(activityLog)
+      .orderBy(desc(activityLog.timestamp))
+      .limit(limit);
   }
 
   async logActivity(userId: string, action: string, details?: string, ipAddress?: string): Promise<void> {

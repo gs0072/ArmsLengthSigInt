@@ -328,11 +328,30 @@ export async function registerRoutes(
       if (!profile || profile.tier !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      const profiles = await storage.getAllUserProfiles();
-      res.json(profiles);
+      const enrichedUsers = await storage.getAdminUserList();
+      res.json(enrichedUsers);
     } catch (error) {
       console.error("Error fetching admin users:", error);
       res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/admin/activity", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const profile = await storage.getUserProfile(userId);
+      if (!profile || profile.tier !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      const targetUserId = req.query.userId as string | undefined;
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+      const logs = targetUserId
+        ? await storage.getActivityLog(targetUserId, limit)
+        : await storage.getAllActivityLog(limit);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching activity log:", error);
+      res.status(500).json({ message: "Failed to fetch activity log" });
     }
   });
 

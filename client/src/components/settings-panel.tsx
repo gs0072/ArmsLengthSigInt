@@ -84,24 +84,6 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
 
   const isToolInstalled = (name: string) => systemInfo?.tools?.find(t => t.name === name)?.installed ?? false;
 
-  const { data: adminUsers = [] } = useQuery<UserProfile[]>({
-    queryKey: ["/api/admin/users"],
-    enabled: isAdmin,
-  });
-
-  const updateUserTierMutation = useMutation({
-    mutationFn: async ({ targetUserId, tier }: { targetUserId: string; tier: string }) => {
-      return apiRequest("PATCH", `/api/admin/users/${targetUserId}`, { tier });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
-      toast({ title: "User Updated", description: "User tier has been changed successfully." });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to update user tier.", variant: "destructive" });
-    },
-  });
-
   const clearDataMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("POST", "/api/clear-data");
@@ -713,49 +695,6 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
           )}
         </div>
 
-        {isAdmin && (
-          <>
-            <GlowLine />
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <UserCog className="w-3.5 h-3.5 text-destructive" />
-                <h4 className="text-xs font-medium text-destructive">Admin: User Management</h4>
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Manage user tiers and access levels for all platform users.
-              </p>
-              {adminUsers.length === 0 && (
-                <p className="text-[10px] text-muted-foreground italic">No other users registered yet.</p>
-              )}
-              {adminUsers.map(u => (
-                <div key={u.userId} className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/10 border border-border/30">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-mono truncate" data-testid={`text-admin-user-${u.userId}`}>
-                      {u.userId}
-                    </p>
-                  </div>
-                  <Select
-                    value={u.tier}
-                    onValueChange={(newTier) => {
-                      updateUserTierMutation.mutate({ targetUserId: u.userId, tier: newTier });
-                    }}
-                  >
-                    <SelectTrigger className="w-28 text-[10px]" data-testid={`select-tier-${u.userId}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="free">Free</SelectItem>
-                      <SelectItem value="basic">Basic</SelectItem>
-                      <SelectItem value="professional">Professional</SelectItem>
-                      <SelectItem value="enterprise">Enterprise</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
       </CardContent>
     </Card>
   );

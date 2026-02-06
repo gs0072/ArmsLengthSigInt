@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  LayoutDashboard, Map, List, Search, Bell, Shield,
+  LayoutDashboard, Map, List, Search, Bell, Shield, UserCog,
   BookOpen, Settings, LogOut, Radar, Activity, Globe, Radio, Wrench, GitBranch
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
@@ -41,8 +41,13 @@ const navItems = [
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 
+const adminNavItems = [
+  { title: "User Management", path: "/admin", icon: UserCog },
+];
+
 export function AppSidebar({ user, alertCount, deviceCount, profile }: AppSidebarProps) {
   const [location, setLocation] = useLocation();
+  const isAdmin = profile?.tier === "admin";
 
   return (
     <Sidebar>
@@ -97,6 +102,35 @@ export function AppSidebar({ user, alertCount, deviceCount, profile }: AppSideba
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-[9px] uppercase tracking-widest text-destructive">
+              Admin
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {adminNavItems.map(item => (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      asChild
+                      data-active={location === item.path}
+                      className="data-[active=true]:bg-sidebar-accent"
+                    >
+                      <button
+                        onClick={() => setLocation(item.path)}
+                        data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
+                      >
+                        <item.icon className="w-4 h-4 text-destructive" />
+                        <span>{item.title}</span>
+                      </button>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         <SidebarGroup>
           <SidebarGroupLabel className="text-[9px] uppercase tracking-widest">
