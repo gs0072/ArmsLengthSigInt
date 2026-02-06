@@ -84,6 +84,18 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     },
   });
 
+  const toggleSensorActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+      await apiRequest("PATCH", `/api/sensors/${id}`, { isActive });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to toggle sensor.", variant: "destructive" });
+    },
+  });
+
   const sensorTypeIcons: Record<string, any> = {
     bluetooth: Bluetooth,
     wifi: Wifi,
@@ -285,15 +297,22 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
                         </p>
                       </div>
                     </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => deleteSensorMutation.mutate(sensor.id)}
-                      disabled={deleteSensorMutation.isPending}
-                      data-testid={`button-delete-sensor-${sensor.id}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Switch
+                        checked={sensor.isActive ?? false}
+                        onCheckedChange={(checked) => toggleSensorActiveMutation.mutate({ id: sensor.id, isActive: checked })}
+                        data-testid={`switch-sensor-active-${sensor.id}`}
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => deleteSensorMutation.mutate(sensor.id)}
+                        disabled={deleteSensorMutation.isPending}
+                        data-testid={`button-delete-sensor-${sensor.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
                   </div>
                 );
               })}

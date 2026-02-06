@@ -43,6 +43,7 @@ const createSensorSchema = z.object({
 const updateSensorSchema = z.object({
   name: z.string().min(1).optional(),
   status: z.enum(["idle", "connecting", "collecting", "error", "disconnected"]).optional(),
+  isActive: z.boolean().optional(),
   config: z.record(z.unknown()).optional(),
   notes: z.string().optional(),
   nodesCollected: z.number().int().optional(),

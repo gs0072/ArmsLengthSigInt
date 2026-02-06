@@ -11,14 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2 } from "lucide-react";
+import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power } from "lucide-react";
 import { isWebBluetoothSupported, scanForBLEDevice, getCurrentPosition } from "@/lib/ble-scanner";
 import { Link } from "wouter";
 import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
-  const [bleScanning, setBleScanning] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -49,6 +49,10 @@ export default function Dashboard() {
     adsb: "hsl(0, 72%, 55%)", sensor: "hsl(320, 70%, 55%)", unknown: "hsl(200, 20%, 50%)",
   };
 
+  const activeSensors = sensors.filter(s => s.isActive);
+  const activeBtSensors = activeSensors.filter(s => s.sensorType === "bluetooth");
+  const activeNonBtSensors = activeSensors.filter(s => s.sensorType !== "bluetooth");
+
   const updateSensorStatus = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
       const res = await apiRequest("PATCH", `/api/sensors/${id}`, { status });
@@ -57,25 +61,43 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
   });
 
-  const activateSensor = useCallback(async (sensor: CollectionSensor) => {
-    if (sensor.sensorType === "bluetooth") {
+  const runScan = useCallback(async () => {
+    if (activeSensors.length === 0) {
+      toast({
+        title: "No Active Sensors",
+        description: "Enable sensors in Settings before scanning.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setScanning(true);
+
+    if (activeNonBtSensors.length > 0) {
+      const types = Array.from(new Set(activeNonBtSensors.map(s => s.sensorType))).join(", ");
+      toast({
+        title: "Native Sensors Pending",
+        description: `${types} sensors require a companion app. Browser scanning supports Bluetooth only.`,
+      });
+    }
+
+    for (const sensor of activeBtSensors) {
       if (!isWebBluetoothSupported()) {
         toast({
           title: "Bluetooth Not Available",
-          description: "Web Bluetooth is not supported in this browser. Use Chrome or Edge.",
+          description: "Web Bluetooth is not supported. Use Chrome or Edge.",
           variant: "destructive",
         });
-        return;
+        break;
       }
+
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
-      setBleScanning(true);
       try {
         const bleDevice = await scanForBLEDevice();
         if (!bleDevice) {
-          toast({ title: "Scan Cancelled", description: "No node was selected." });
+          toast({ title: "Scan Cancelled", description: `${sensor.name}: No node selected.` });
           updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
-          setBleScanning(false);
-          return;
+          continue;
         }
         const pos = await getCurrentPosition();
         const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(bleDevice.id)}`, { credentials: "include" });
@@ -83,7 +105,7 @@ export default function Dashboard() {
         let device: Device;
         if (existing && existing.id) {
           device = existing;
-          toast({ title: "Node Found", description: `${bleDevice.name || bleDevice.id} already tracked. Logging new observation.` });
+          toast({ title: "Node Found", description: `${bleDevice.name || bleDevice.id} already tracked. Logging observation.` });
         } else {
           const createRes = await apiRequest("POST", "/api/devices", {
             name: bleDevice.name || `BLE ${bleDevice.id.substring(0, 8)}`,
@@ -106,32 +128,24 @@ export default function Dashboard() {
           if (pos.alt != null) obsBody.altitude = pos.alt;
         }
         await apiRequest("POST", "/api/observations", obsBody);
-        updateSensorStatus.mutate({
-          id: sensor.id,
-          status: "idle",
-        });
+        updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
         await apiRequest("PATCH", `/api/sensors/${sensor.id}`, {
           nodesCollected: (sensor.nodesCollected || 0) + 1,
         });
-        queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
         setSelectedDeviceId(device.id);
       } catch (err: any) {
         updateSensorStatus.mutate({ id: sensor.id, status: "error" });
         if (err.name !== "NotFoundError") {
-          toast({ title: "Scan Error", description: err.message, variant: "destructive" });
+          toast({ title: "Scan Error", description: `${sensor.name}: ${err.message}`, variant: "destructive" });
         }
-      } finally {
-        setBleScanning(false);
       }
-    } else {
-      toast({
-        title: "Hardware Required",
-        description: `${sensor.name} requires a native companion app for ${sensor.sensorType} collection. Coming soon.`,
-      });
     }
-  }, [toast, updateSensorStatus, queryClient]);
+
+    queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
+    setScanning(false);
+  }, [activeSensors, activeBtSensors, activeNonBtSensors, toast, updateSensorStatus, queryClient]);
 
   const toggleTrack = useMutation({
     mutationFn: async (id: number) => {
@@ -163,28 +177,34 @@ export default function Dashboard() {
             {devices.length} Nodes
           </Badge>
           <Badge variant="outline" className="text-[9px] uppercase">
-            {sensors.length} Sensors
+            {activeSensors.length} / {sensors.length} Sensors Active
           </Badge>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {sensors.filter(s => s.sensorType === "bluetooth").length > 0 ? (
-            sensors.filter(s => s.sensorType === "bluetooth").map(sensor => (
-              <Button
-                key={sensor.id}
-                size="sm"
-                variant={bleScanning ? "destructive" : "default"}
-                onClick={() => activateSensor(sensor)}
-                disabled={bleScanning}
-                data-testid={`button-activate-sensor-${sensor.id}`}
-              >
-                <Bluetooth className="w-3.5 h-3.5 mr-1" />
-                {bleScanning ? "Scanning..." : sensor.name}
-              </Button>
-            ))
+          {sensors.length > 0 ? (
+            <Button
+              size="sm"
+              variant={scanning ? "destructive" : "default"}
+              onClick={runScan}
+              disabled={scanning || activeSensors.length === 0}
+              data-testid="button-start-scan"
+            >
+              {scanning ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  Scanning...
+                </>
+              ) : (
+                <>
+                  <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
+                  Start Scan
+                </>
+              )}
+            </Button>
           ) : (
             <Link href="/settings">
               <Button size="sm" variant="outline" data-testid="button-configure-sensors">
-                <Settings className="w-3.5 h-3.5 mr-1" />
+                <Settings className="w-3.5 h-3.5 mr-1.5" />
                 Configure Sensors
               </Button>
             </Link>
@@ -249,7 +269,7 @@ export default function Dashboard() {
 
         {!selectedDevice && (
           <Card className="flex flex-col items-center justify-center p-6 text-center overflow-visible gap-4">
-            <ScanPulse active={bleScanning} size={60} />
+            <ScanPulse active={scanning} size={60} />
             <div>
               <p className="text-xs text-muted-foreground">Select a node to view details</p>
               <p className="text-[10px] text-muted-foreground mt-1">
@@ -257,32 +277,54 @@ export default function Dashboard() {
               </p>
             </div>
             {sensors.length > 0 ? (
-              <div className="flex flex-col gap-2 w-full max-w-[220px]">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Activate Sensor</p>
-                {sensors.map(sensor => {
-                  const SIcon = sensorTypeIcons[sensor.sensorType] || Radar;
-                  const isBleSensor = sensor.sensorType === "bluetooth";
-                  return (
-                    <Button
-                      key={sensor.id}
-                      size="sm"
-                      variant={isBleSensor ? "default" : "outline"}
-                      onClick={() => activateSensor(sensor)}
-                      disabled={isBleSensor && bleScanning}
-                      data-testid={`button-activate-sensor-panel-${sensor.id}`}
-                    >
-                      <SIcon className="w-3.5 h-3.5 mr-1" />
-                      {isBleSensor && bleScanning ? "Scanning..." : sensor.name}
-                    </Button>
-                  );
-                })}
+              <div className="flex flex-col gap-3 w-full max-w-[260px]">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Active Sensors</p>
+                <div className="flex flex-col gap-1.5">
+                  {sensors.map(sensor => {
+                    const SIcon = sensorTypeIcons[sensor.sensorType] || Radar;
+                    const color = sensorTypeColors[sensor.sensorType] || "hsl(200, 20%, 50%)";
+                    return (
+                      <div
+                        key={sensor.id}
+                        className={`flex items-center gap-2 p-2 rounded-md border text-xs ${sensor.isActive ? "border-primary/30 bg-primary/5" : "border-border/30 bg-muted/10 opacity-50"}`}
+                        data-testid={`sensor-status-${sensor.id}`}
+                      >
+                        <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
+                        <span className="flex-1 truncate">{sensor.name}</span>
+                        <Badge variant="outline" className="text-[8px] uppercase">
+                          {sensor.isActive ? (sensor.status === "collecting" ? "scanning" : "ready") : "off"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button
+                  size="sm"
+                  variant={scanning ? "destructive" : "default"}
+                  onClick={runScan}
+                  disabled={scanning || activeSensors.length === 0}
+                  className="w-full"
+                  data-testid="button-start-scan-panel"
+                >
+                  {scanning ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      Scanning All Sensors...
+                    </>
+                  ) : (
+                    <>
+                      <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
+                      Start Scan ({activeSensors.length} active)
+                    </>
+                  )}
+                </Button>
               </div>
             ) : (
               <div className="flex flex-col gap-2 w-full max-w-[220px]">
                 <p className="text-[10px] text-muted-foreground">No sensors configured yet</p>
                 <Link href="/settings">
                   <Button size="sm" variant="outline" className="w-full" data-testid="button-goto-settings-panel">
-                    <Settings className="w-3.5 h-3.5 mr-1" />
+                    <Settings className="w-3.5 h-3.5 mr-1.5" />
                     Configure Sensors in Settings
                   </Button>
                 </Link>

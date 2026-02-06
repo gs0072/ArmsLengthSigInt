@@ -5,10 +5,24 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SignalBadge, SignalStrengthBar } from "./signal-badge";
-import { Search, Filter, ChevronRight, Eye, EyeOff, Flag, MapPin, Clock } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Search, ChevronRight, Eye, EyeOff, Flag, MapPin, Clock, Bluetooth, Wifi, Radio, Antenna, Satellite, Smartphone, Car, Cpu, Headphones, Navigation, Watch, Tag } from "lucide-react";
 import type { Device, Observation } from "@shared/schema";
-import { timeAgo } from "@/lib/signal-utils";
+import { timeAgo, NODE_FILTER_CATEGORIES } from "@/lib/signal-utils";
+
+const filterIcons: Record<string, any> = {
+  bluetooth: Bluetooth,
+  wifi: Wifi,
+  phones: Smartphone,
+  drones: Navigation,
+  vehicles: Car,
+  iot: Cpu,
+  wearables: Watch,
+  trackers: Tag,
+  lora: Radio,
+  sdr: Antenna,
+  adsb: Satellite,
+  audio: Headphones,
+};
 
 interface DeviceListProps {
   devices: Device[];
@@ -20,8 +34,20 @@ interface DeviceListProps {
 
 export function DeviceList({ devices, observations, selectedDeviceId, onSelectDevice, isLoading }: DeviceListProps) {
   const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState<string>("all");
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
   const [filterTracked, setFilterTracked] = useState<string>("all");
+
+  const toggleFilter = (key: string) => {
+    setActiveFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   const latestObs = new Map<number, Observation>();
   observations.forEach(obs => {
@@ -31,6 +57,30 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
     }
   });
 
+  const matchesCategory = (device: Device): boolean => {
+    if (activeFilters.size === 0) return true;
+
+    const activeFilterKeys = Array.from(activeFilters);
+
+    return activeFilterKeys.some(filterKey => {
+      const cat = NODE_FILTER_CATEGORIES.find(c => c.key === filterKey);
+      if (!cat) return false;
+
+      if (cat.signalTypes.length > 0 && (cat.signalTypes as readonly string[]).includes(device.signalType)) {
+        return true;
+      }
+
+      if (cat.deviceTypes.length > 0 && device.deviceType) {
+        return cat.deviceTypes.some(dt =>
+          device.deviceType!.toLowerCase().includes(dt.toLowerCase()) ||
+          dt.toLowerCase().includes(device.deviceType!.toLowerCase())
+        );
+      }
+
+      return false;
+    });
+  };
+
   const filtered = devices.filter(d => {
     const matchSearch = !search ||
       d.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -39,12 +89,12 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
       d.model?.toLowerCase().includes(search.toLowerCase()) ||
       d.uuid?.toLowerCase().includes(search.toLowerCase());
 
-    const matchType = filterType === "all" || d.signalType === filterType;
+    const matchCat = matchesCategory(d);
     const matchTracked = filterTracked === "all" ||
       (filterTracked === "tracked" && d.isTracked) ||
       (filterTracked === "flagged" && d.isFlagged);
 
-    return matchSearch && matchType && matchTracked;
+    return matchSearch && matchCat && matchTracked;
   });
 
   return (
@@ -61,40 +111,65 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
               data-testid="input-device-search"
             />
           </div>
-          <Button size="icon" variant="ghost" data-testid="button-filter-toggle">
-            <Filter className="w-4 h-4" />
-          </Button>
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant={filterTracked === "tracked" ? "default" : "outline"}
+              onClick={() => setFilterTracked(filterTracked === "tracked" ? "all" : "tracked")}
+              data-testid="button-filter-tracked"
+              className="toggle-elevate"
+            >
+              <Eye className="w-3 h-3 mr-1" />
+              <span className="text-[10px]">Tracked</span>
+            </Button>
+            <Button
+              size="sm"
+              variant={filterTracked === "flagged" ? "default" : "outline"}
+              onClick={() => setFilterTracked(filterTracked === "flagged" ? "all" : "flagged")}
+              data-testid="button-filter-flagged"
+              className="toggle-elevate"
+            >
+              <Flag className="w-3 h-3 mr-1" />
+              <span className="text-[10px]">Flagged</span>
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="text-xs flex-1" data-testid="select-signal-filter">
-              <SelectValue placeholder="Signal type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Signals</SelectItem>
-              <SelectItem value="bluetooth">Bluetooth</SelectItem>
-              <SelectItem value="wifi">Wi-Fi</SelectItem>
-              <SelectItem value="rfid">RFID</SelectItem>
-              <SelectItem value="sdr">SDR</SelectItem>
-              <SelectItem value="lora">LoRa</SelectItem>
-              <SelectItem value="meshtastic">Meshtastic</SelectItem>
-              <SelectItem value="adsb">ADS-B</SelectItem>
-              <SelectItem value="sensor">Sensor</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterTracked} onValueChange={setFilterTracked}>
-            <SelectTrigger className="text-xs flex-1" data-testid="select-status-filter">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="tracked">Tracked</SelectItem>
-              <SelectItem value="flagged">Flagged</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap gap-1" data-testid="node-category-filters">
+          {NODE_FILTER_CATEGORIES.map(cat => {
+            const IconComp = filterIcons[cat.key] || Cpu;
+            const isOn = activeFilters.has(cat.key);
+            return (
+              <Button
+                key={cat.key}
+                size="sm"
+                variant={isOn ? "default" : "outline"}
+                onClick={() => toggleFilter(cat.key)}
+                className="toggle-elevate"
+                data-testid={`button-filter-${cat.key}`}
+              >
+                <IconComp className="w-3 h-3 mr-1" />
+                <span className="text-[10px]">{cat.label}</span>
+              </Button>
+            );
+          })}
+          {activeFilters.size > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setActiveFilters(new Set())}
+              data-testid="button-clear-filters"
+            >
+              <span className="text-[10px]">Clear All</span>
+            </Button>
+          )}
         </div>
         <div className="text-xs text-muted-foreground">
           {filtered.length} node{filtered.length !== 1 ? "s" : ""} found
+          {activeFilters.size > 0 && (
+            <span className="ml-1">
+              ({activeFilters.size} filter{activeFilters.size !== 1 ? "s" : ""} active)
+            </span>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex-1 px-2 pb-2 overflow-hidden">
@@ -142,6 +217,11 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                           <SignalBadge type={device.signalType} size="sm" />
+                          {device.deviceType && (
+                            <Badge variant="outline" className="text-[8px]">
+                              {device.deviceType}
+                            </Badge>
+                          )}
                           {obs && (
                             <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                               <Clock className="w-2.5 h-2.5" />

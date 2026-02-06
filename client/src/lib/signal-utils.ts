@@ -93,6 +93,21 @@ export const DEVICE_CATEGORIES = [
   }
 ] as const;
 
+export const NODE_FILTER_CATEGORIES = [
+  { key: "bluetooth", label: "Bluetooth", signalTypes: ["bluetooth"], deviceTypes: [] },
+  { key: "wifi", label: "Wi-Fi", signalTypes: ["wifi"], deviceTypes: [] },
+  { key: "phones", label: "Phones", signalTypes: [], deviceTypes: ["Apple iPhone", "Samsung Galaxy", "Google Pixel", "OnePlus", "Xiaomi", "Huawei", "Motorola", "Sony Xperia", "LG", "Nokia", "Mobile Phone"] },
+  { key: "drones", label: "Drones", signalTypes: [], deviceTypes: ["DJI Mavic", "DJI Mini", "DJI Phantom", "Skydio", "Autel", "Parrot", "Drone", "UAV"] },
+  { key: "vehicles", label: "Vehicles", signalTypes: [], deviceTypes: ["Tesla", "BMW", "Mercedes", "Audi", "Ford", "Toyota", "OBD-II Scanner", "Vehicle"] },
+  { key: "iot", label: "IoT", signalTypes: [], deviceTypes: ["Amazon Echo", "Google Nest", "Ring Doorbell", "Hue Lights", "Smart Lock", "Smart Thermostat", "Smart Plug", "IoT"] },
+  { key: "wearables", label: "Wearables", signalTypes: [], deviceTypes: ["Apple Watch", "Samsung Galaxy Watch", "Fitbit", "Garmin", "Amazfit", "Whoop", "Oura Ring", "Wearable"] },
+  { key: "trackers", label: "Trackers", signalTypes: [], deviceTypes: ["Apple AirTag", "Tile Tracker", "Samsung SmartTag", "Chipolo", "Tracker", "Tag"] },
+  { key: "lora", label: "LoRa", signalTypes: ["lora", "meshtastic"], deviceTypes: [] },
+  { key: "sdr", label: "SDR", signalTypes: ["sdr"], deviceTypes: [] },
+  { key: "adsb", label: "Aircraft", signalTypes: ["adsb"], deviceTypes: ["Commercial Airliner", "Private Aircraft", "Helicopter", "Military Aircraft"] },
+  { key: "audio", label: "Audio", signalTypes: [], deviceTypes: ["AirPods", "Galaxy Buds", "Sony WF/WH", "Bose QC", "JBL Speaker", "Sonos", "Marshall Speaker", "Audio"] },
+] as const;
+
 export function formatCoordinates(lat: number | null, lng: number | null): string {
   if (lat == null || lng == null) return "Unknown";
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
