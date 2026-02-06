@@ -14,13 +14,16 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
   - Settings panel has sensor management section (add/view/delete sensors)
   - Dashboard shows sensor activation buttons (replaces old BLE Scan / Add Device buttons)
 - **Passive Monitoring**: Simulated Wireshark-style passive scanning (no Web Bluetooth pairing dialogs)
-  - `ble-scanner.ts` with 120+ device templates across 8 signal types (BLE, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, Sensor)
+  - `ble-scanner.ts` with 150+ device templates across 8 signal types (BLE, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, Sensor)
   - **Progressive discovery**: nodes created immediately with MAC + RSSI, then name/manufacturer/type resolve on subsequent passes (like real scanners)
+  - **LoRa/Meshtastic short+long name resolution**: mesh nodes resolve short name (4-char callsign like "HV3N") first, then full long name (e.g., "Heltec V3 Node") on subsequent passes — matching real Meshtastic/Meshcore behavior
+  - **LoRa modalities**: Meshtastic, Meshcore, Helium, ChirpStack, LoRa P2P, LoRaWAN — all under `lora` signal type
   - Each template has a `resolveDelay` controlling how many passes before full resolution
   - Burst emissions: initial 3-6 device burst, then 1-4 per tick at ~1.5s intervals
   - Dashboard `persistNode` creates nodes with partial data, then PATCHes when fields resolve
-  - Live signal feed shows "resolving" indicator for unresolved nodes
-  - Each discovered node is persisted to DB with GPS auto-tagging
+  - Live signal feed shows "resolving" indicator for unresolved nodes, "GPS" tag for telemetry nodes
+  - **Telemetry Location Reconciliation**: LoRa, Meshtastic, ADS-B, and drone nodes use their broadcasted GPS telemetry position for observations, NOT the collection sensor's host location. Non-telemetry nodes (BLE, WiFi, RFID) fall back to the sensor host's browser geolocation.
+  - Each discovered node is persisted to DB with location auto-tagging (telemetry or sensor GPS)
 - **Device Associations (Multi-INT Intelligence Links)**:
   - `device_associations` table with intelligence discipline-aligned association types
   - **No type-based associations**: links are NOT made based on device/node type — only movement, triangulation, signal behavior, and temporal patterns

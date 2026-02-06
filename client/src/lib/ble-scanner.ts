@@ -10,6 +10,8 @@ export interface DiscoveredNode {
   channel: number | null;
   encryption: string;
   resolved: boolean;
+  shortName?: string | null;
+  longName?: string | null;
   broadcastLat?: number | null;
   broadcastLng?: number | null;
   broadcastAlt?: number | null;
@@ -34,6 +36,8 @@ interface DeviceTemplate {
   channel: number | null;
   encryption: string;
   resolveDelay: number;
+  shortName?: string;
+  longName?: string;
   broadcastsTelemetry?: boolean;
   telemetryBaseLat?: number;
   telemetryBaseLng?: number;
@@ -166,46 +170,51 @@ const SDR_DEVICE_POOL: DeviceTemplate[] = [
 ];
 
 const LORA_DEVICE_POOL: DeviceTemplate[] = [
-  { name: "Dragino LHT65N", id: "LORA:A84041F831", signalType: "lora", deviceType: "Temp/Humidity Sensor", manufacturer: "Dragino", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2 },
-  { name: "RAK WisBlock Tracker", id: "LORA:AC1F09FFFE", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "RAKwireless", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.749, telemetryBaseLng: -84.388, telemetryBaseAlt: 320, telemetryDriftRadius: 0.008 },
-  { name: "Kerlink iFemtoCell", id: "LORA:7276FF0001", signalType: "lora", deviceType: "Gateway", manufacturer: "Kerlink", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.753, telemetryBaseLng: -84.386, telemetryBaseAlt: 305, telemetryDriftRadius: 0.0001 },
-  { name: "Tektelic Kona Micro", id: "LORA:647FDA0003", signalType: "lora", deviceType: "Gateway", manufacturer: "Tektelic", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.755, telemetryBaseLng: -84.390, telemetryBaseAlt: 312, telemetryDriftRadius: 0.0001 },
-  { name: "Seeed SenseCAP S2120", id: "LORA:2CF7F12100", signalType: "lora", deviceType: "Weather Station", manufacturer: "Seeed", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.748, telemetryBaseLng: -84.391, telemetryBaseAlt: 298, telemetryDriftRadius: 0.0002 },
-  { name: "Browan TBMS100", id: "LORA:00137A1000", signalType: "lora", deviceType: "Motion Sensor", manufacturer: "Browan", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3 },
-  { name: "Milesight EM300-TH", id: "LORA:24E124136B", signalType: "lora", deviceType: "Temp/Humidity Sensor", manufacturer: "Milesight", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2 },
-  { name: "Elsys ERS CO2", id: "LORA:A81758FFFE", signalType: "lora", deviceType: "Air Quality Sensor", manufacturer: "Elsys", protocol: "LoRaWAN 1.0.3", frequency: 868000000, channel: null, encryption: "AES-128", resolveDelay: 3 },
-  { name: "Meshcore Relay Alpha", id: "LORA:MC:!d4e5f6a7", signalType: "lora", deviceType: "Mesh Relay", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.760, telemetryBaseLng: -84.385, telemetryBaseAlt: 340, telemetryDriftRadius: 0.005 },
-  { name: "Meshcore Tracker T1", id: "LORA:MC:!b8c9d0e1", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.745, telemetryBaseLng: -84.395, telemetryBaseAlt: 310, telemetryDriftRadius: 0.012 },
-  { name: "Meshcore Base Station", id: "LORA:MC:!f2a3b4c5", signalType: "lora", deviceType: "Base Station", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.752, telemetryBaseLng: -84.388, telemetryBaseAlt: 318, telemetryDriftRadius: 0.0001 },
-  { name: "Helium Hotspot", id: "LORA:HNT:112ABC34", signalType: "lora", deviceType: "Hotspot/Gateway", manufacturer: "Bobcat", protocol: "LoRaWAN HIP", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.758, telemetryBaseLng: -84.382, telemetryBaseAlt: 325, telemetryDriftRadius: 0.0001 },
-  { name: "Helium Mapper", id: "LORA:HNT:MAPPER001", signalType: "lora", deviceType: "Coverage Mapper", manufacturer: "Helium", protocol: "LoRaWAN HIP", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.741, telemetryBaseLng: -84.400, telemetryBaseAlt: 290, telemetryDriftRadius: 0.015 },
-  { name: "LoRa P2P Relay Node", id: "LORA:P2P:RELAY001", signalType: "lora", deviceType: "P2P Relay", manufacturer: "Custom", protocol: "LoRa P2P", frequency: 915000000, channel: null, encryption: "None", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.756, telemetryBaseLng: -84.379, telemetryBaseAlt: 335, telemetryDriftRadius: 0.0003 },
-  { name: "LoRa P2P Sensor Node", id: "LORA:P2P:SENSOR01", signalType: "lora", deviceType: "Remote Sensor", manufacturer: "Custom", protocol: "LoRa P2P", frequency: 868000000, channel: null, encryption: "None", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.743, telemetryBaseLng: -84.393, telemetryBaseAlt: 305, telemetryDriftRadius: 0.0005 },
-  { name: "ChirpStack Gateway", id: "LORA:CS:GW00A1B2", signalType: "lora", deviceType: "Network Server GW", manufacturer: "ChirpStack", protocol: "LoRaWAN NS", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.750, telemetryBaseLng: -84.387, telemetryBaseAlt: 310, telemetryDriftRadius: 0.0001 },
-  { name: "Cattle Tracker LoRa", id: "LORA:AG:CATTLE01", signalType: "lora", deviceType: "Livestock Tracker", manufacturer: "Digital Matter", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.735, telemetryBaseLng: -84.410, telemetryBaseAlt: 280, telemetryDriftRadius: 0.02 },
-  { name: "Oyster3 Asset Tracker", id: "LORA:DM:OYSTER03", signalType: "lora", deviceType: "Asset Tracker", manufacturer: "Digital Matter", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.762, telemetryBaseLng: -84.375, telemetryBaseAlt: 330, telemetryDriftRadius: 0.01 },
+  { name: "Dragino LHT65N", id: "LORA:A84041F831", signalType: "lora", deviceType: "Temp/Humidity Sensor", manufacturer: "Dragino", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, shortName: "DRG1", longName: "Dragino LHT65N" },
+  { name: "RAK WisBlock Tracker", id: "LORA:AC1F09FFFE", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "RAKwireless", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, shortName: "RAKT", longName: "RAK WisBlock Tracker", broadcastsTelemetry: true, telemetryBaseLat: 33.749, telemetryBaseLng: -84.388, telemetryBaseAlt: 320, telemetryDriftRadius: 0.008 },
+  { name: "Kerlink iFemtoCell", id: "LORA:7276FF0001", signalType: "lora", deviceType: "Gateway", manufacturer: "Kerlink", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, shortName: "KGWY", longName: "Kerlink iFemtoCell GW", broadcastsTelemetry: true, telemetryBaseLat: 33.753, telemetryBaseLng: -84.386, telemetryBaseAlt: 305, telemetryDriftRadius: 0.0001 },
+  { name: "Tektelic Kona Micro", id: "LORA:647FDA0003", signalType: "lora", deviceType: "Gateway", manufacturer: "Tektelic", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, shortName: "TKGW", longName: "Tektelic Kona Micro GW", broadcastsTelemetry: true, telemetryBaseLat: 33.755, telemetryBaseLng: -84.390, telemetryBaseAlt: 312, telemetryDriftRadius: 0.0001 },
+  { name: "Seeed SenseCAP S2120", id: "LORA:2CF7F12100", signalType: "lora", deviceType: "Weather Station", manufacturer: "Seeed", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, shortName: "SCAP", longName: "SenseCAP S2120 Weather", broadcastsTelemetry: true, telemetryBaseLat: 33.748, telemetryBaseLng: -84.391, telemetryBaseAlt: 298, telemetryDriftRadius: 0.0002 },
+  { name: "Browan TBMS100", id: "LORA:00137A1000", signalType: "lora", deviceType: "Motion Sensor", manufacturer: "Browan", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, shortName: "BRWN", longName: "Browan TBMS100 Motion" },
+  { name: "Milesight EM300-TH", id: "LORA:24E124136B", signalType: "lora", deviceType: "Temp/Humidity Sensor", manufacturer: "Milesight", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, shortName: "MS30", longName: "Milesight EM300-TH" },
+  { name: "Elsys ERS CO2", id: "LORA:A81758FFFE", signalType: "lora", deviceType: "Air Quality Sensor", manufacturer: "Elsys", protocol: "LoRaWAN 1.0.3", frequency: 868000000, channel: null, encryption: "AES-128", resolveDelay: 3, shortName: "ELCO", longName: "Elsys ERS CO2 Sensor" },
+  { name: "Meshcore Relay Alpha", id: "LORA:MC:!d4e5f6a7", signalType: "lora", deviceType: "Mesh Relay", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, shortName: "MCR1", longName: "Meshcore Relay Alpha", broadcastsTelemetry: true, telemetryBaseLat: 33.760, telemetryBaseLng: -84.385, telemetryBaseAlt: 340, telemetryDriftRadius: 0.005 },
+  { name: "Meshcore Tracker T1", id: "LORA:MC:!b8c9d0e1", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, shortName: "MCT1", longName: "Meshcore Tracker T1", broadcastsTelemetry: true, telemetryBaseLat: 33.745, telemetryBaseLng: -84.395, telemetryBaseAlt: 310, telemetryDriftRadius: 0.012 },
+  { name: "Meshcore Base Station", id: "LORA:MC:!f2a3b4c5", signalType: "lora", deviceType: "Base Station", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, shortName: "MCBS", longName: "Meshcore Base Station", broadcastsTelemetry: true, telemetryBaseLat: 33.752, telemetryBaseLng: -84.388, telemetryBaseAlt: 318, telemetryDriftRadius: 0.0001 },
+  { name: "Meshcore Sensor Node", id: "LORA:MC:!a2b3c4d5", signalType: "lora", deviceType: "Sensor Node", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, shortName: "MCSN", longName: "Meshcore Sensor Node", broadcastsTelemetry: true, telemetryBaseLat: 33.747, telemetryBaseLng: -84.392, telemetryBaseAlt: 295, telemetryDriftRadius: 0.003 },
+  { name: "Helium Hotspot", id: "LORA:HNT:112ABC34", signalType: "lora", deviceType: "Hotspot/Gateway", manufacturer: "Bobcat", protocol: "LoRaWAN HIP", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, shortName: "HNT1", longName: "Helium Hotspot Bobcat", broadcastsTelemetry: true, telemetryBaseLat: 33.758, telemetryBaseLng: -84.382, telemetryBaseAlt: 325, telemetryDriftRadius: 0.0001 },
+  { name: "Helium Mapper", id: "LORA:HNT:MAPPER001", signalType: "lora", deviceType: "Coverage Mapper", manufacturer: "Helium", protocol: "LoRaWAN HIP", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, shortName: "HMAP", longName: "Helium Coverage Mapper", broadcastsTelemetry: true, telemetryBaseLat: 33.741, telemetryBaseLng: -84.400, telemetryBaseAlt: 290, telemetryDriftRadius: 0.015 },
+  { name: "LoRa P2P Relay Node", id: "LORA:P2P:RELAY001", signalType: "lora", deviceType: "P2P Relay", manufacturer: "Custom", protocol: "LoRa P2P", frequency: 915000000, channel: null, encryption: "None", resolveDelay: 3, shortName: "P2PR", longName: "LoRa P2P Relay Node", broadcastsTelemetry: true, telemetryBaseLat: 33.756, telemetryBaseLng: -84.379, telemetryBaseAlt: 335, telemetryDriftRadius: 0.0003 },
+  { name: "LoRa P2P Sensor Node", id: "LORA:P2P:SENSOR01", signalType: "lora", deviceType: "Remote Sensor", manufacturer: "Custom", protocol: "LoRa P2P", frequency: 868000000, channel: null, encryption: "None", resolveDelay: 3, shortName: "P2PS", longName: "LoRa P2P Sensor Node", broadcastsTelemetry: true, telemetryBaseLat: 33.743, telemetryBaseLng: -84.393, telemetryBaseAlt: 305, telemetryDriftRadius: 0.0005 },
+  { name: "ChirpStack Gateway", id: "LORA:CS:GW00A1B2", signalType: "lora", deviceType: "Network Server GW", manufacturer: "ChirpStack", protocol: "LoRaWAN NS", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, shortName: "CSGW", longName: "ChirpStack Gateway", broadcastsTelemetry: true, telemetryBaseLat: 33.750, telemetryBaseLng: -84.387, telemetryBaseAlt: 310, telemetryDriftRadius: 0.0001 },
+  { name: "Cattle Tracker LoRa", id: "LORA:AG:CATTLE01", signalType: "lora", deviceType: "Livestock Tracker", manufacturer: "Digital Matter", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, shortName: "COW1", longName: "Cattle Tracker Unit 1", broadcastsTelemetry: true, telemetryBaseLat: 33.735, telemetryBaseLng: -84.410, telemetryBaseAlt: 280, telemetryDriftRadius: 0.02 },
+  { name: "Oyster3 Asset Tracker", id: "LORA:DM:OYSTER03", signalType: "lora", deviceType: "Asset Tracker", manufacturer: "Digital Matter", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, shortName: "OY3T", longName: "Oyster3 Asset Tracker", broadcastsTelemetry: true, telemetryBaseLat: 33.762, telemetryBaseLng: -84.375, telemetryBaseAlt: 330, telemetryDriftRadius: 0.01 },
 ];
 
 const MESHTASTIC_DEVICE_POOL: DeviceTemplate[] = [
-  { name: "Heltec V3 Node", id: "MESH:!a1b2c3d4", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "Heltec", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1 },
-  { name: "T-Beam Supreme", id: "MESH:!e5f6a7b8", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "LILYGO", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1 },
-  { name: "RAK WisMesh Pocket", id: "MESH:!c9d0e1f2", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "RAKwireless", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2 },
-  { name: "Station G2", id: "MESH:!33445566", signalType: "meshtastic", deviceType: "Base Station", manufacturer: "Meshtastic", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1 },
-  { name: "RP2040 Relay Node", id: "MESH:!77889900", signalType: "meshtastic", deviceType: "Relay Node", manufacturer: "LILYGO", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 3 },
-  { name: "Solar Repeater", id: "MESH:!aabbccdd", signalType: "meshtastic", deviceType: "Repeater", manufacturer: "Custom", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 3 },
+  { name: "Heltec V3 Node", id: "MESH:!a1b2c3d4", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "Heltec", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, shortName: "HV3N", longName: "Heltec V3 Node", broadcastsTelemetry: true, telemetryBaseLat: 33.770, telemetryBaseLng: -84.370, telemetryBaseAlt: 350, telemetryDriftRadius: 0.006 },
+  { name: "T-Beam Supreme", id: "MESH:!e5f6a7b8", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "LILYGO", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, shortName: "TBSP", longName: "T-Beam Supreme GPS", broadcastsTelemetry: true, telemetryBaseLat: 33.765, telemetryBaseLng: -84.380, telemetryBaseAlt: 342, telemetryDriftRadius: 0.01 },
+  { name: "RAK WisMesh Pocket", id: "MESH:!c9d0e1f2", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "RAKwireless", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, shortName: "RAKP", longName: "RAK WisMesh Pocket", broadcastsTelemetry: true, telemetryBaseLat: 33.755, telemetryBaseLng: -84.395, telemetryBaseAlt: 315, telemetryDriftRadius: 0.008 },
+  { name: "Station G2", id: "MESH:!33445566", signalType: "meshtastic", deviceType: "Base Station", manufacturer: "Meshtastic", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, shortName: "STG2", longName: "Station G2 Base", broadcastsTelemetry: true, telemetryBaseLat: 33.751, telemetryBaseLng: -84.389, telemetryBaseAlt: 308, telemetryDriftRadius: 0.0001 },
+  { name: "RP2040 Relay Node", id: "MESH:!77889900", signalType: "meshtastic", deviceType: "Relay Node", manufacturer: "LILYGO", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 3, shortName: "RP20", longName: "RP2040 Relay Node", broadcastsTelemetry: true, telemetryBaseLat: 33.763, telemetryBaseLng: -84.372, telemetryBaseAlt: 360, telemetryDriftRadius: 0.0003 },
+  { name: "Solar Repeater", id: "MESH:!aabbccdd", signalType: "meshtastic", deviceType: "Repeater", manufacturer: "Custom", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 3, shortName: "SOLR", longName: "Solar Repeater Hilltop", broadcastsTelemetry: true, telemetryBaseLat: 33.780, telemetryBaseLng: -84.365, telemetryBaseAlt: 420, telemetryDriftRadius: 0.0002 },
+  { name: "Heltec Capsule V3", id: "MESH:!11223344", signalType: "meshtastic", deviceType: "Compact Node", manufacturer: "Heltec", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, shortName: "HCAP", longName: "Heltec Capsule V3", broadcastsTelemetry: true, telemetryBaseLat: 33.742, telemetryBaseLng: -84.402, telemetryBaseAlt: 288, telemetryDriftRadius: 0.007 },
+  { name: "WisMesh TAP", id: "MESH:!55667788", signalType: "meshtastic", deviceType: "Mesh Node", manufacturer: "RAKwireless", protocol: "Meshtastic 2.3", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, shortName: "WTAP", longName: "WisMesh TAP Node", broadcastsTelemetry: true, telemetryBaseLat: 33.768, telemetryBaseLng: -84.378, telemetryBaseAlt: 338, telemetryDriftRadius: 0.009 },
 ];
 
 const ADSB_DEVICE_POOL: DeviceTemplate[] = [
-  { name: "DAL1247 B737-900", id: "ADSB:A12345", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0 },
-  { name: "UAL892 A320neo", id: "ADSB:A67890", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Airbus", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0 },
-  { name: "N52341 Cessna 172", id: "ADSB:A34567", signalType: "adsb", deviceType: "General Aviation", manufacturer: "Cessna", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1 },
-  { name: "AAL445 B787-9", id: "ADSB:AB1234", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0 },
-  { name: "N8127P PA-28", id: "ADSB:A78901", signalType: "adsb", deviceType: "General Aviation", manufacturer: "Piper", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1 },
-  { name: "SWA3421 B737 MAX 8", id: "ADSB:AC5678", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0 },
-  { name: "LifeFlight N911LF", id: "ADSB:A45678", signalType: "adsb", deviceType: "Helicopter", manufacturer: "Airbus H145", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1 },
-  { name: "USAF C-17A", id: "ADSB:AE1234", signalType: "adsb", deviceType: "Military Transport", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 2 },
-  { name: "DJI Mavic 3 Enterprise", id: "ADSB:DJI00123", signalType: "adsb", deviceType: "UAS/Drone", manufacturer: "DJI", protocol: "Remote ID", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1 },
-  { name: "Skydio X10", id: "ADSB:SKY00456", signalType: "adsb", deviceType: "UAS/Drone", manufacturer: "Skydio", protocol: "Remote ID", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 2 },
+  { name: "DAL1247 B737-900", id: "ADSB:A12345", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0, broadcastsTelemetry: true, telemetryBaseLat: 33.640, telemetryBaseLng: -84.430, telemetryBaseAlt: 10668, telemetryDriftRadius: 0.15 },
+  { name: "UAL892 A320neo", id: "ADSB:A67890", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Airbus", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0, broadcastsTelemetry: true, telemetryBaseLat: 33.680, telemetryBaseLng: -84.350, telemetryBaseAlt: 9144, telemetryDriftRadius: 0.12 },
+  { name: "N52341 Cessna 172", id: "ADSB:A34567", signalType: "adsb", deviceType: "General Aviation", manufacturer: "Cessna", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.720, telemetryBaseLng: -84.310, telemetryBaseAlt: 1524, telemetryDriftRadius: 0.04 },
+  { name: "AAL445 B787-9", id: "ADSB:AB1234", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0, broadcastsTelemetry: true, telemetryBaseLat: 33.590, telemetryBaseLng: -84.520, telemetryBaseAlt: 11278, telemetryDriftRadius: 0.18 },
+  { name: "N8127P PA-28", id: "ADSB:A78901", signalType: "adsb", deviceType: "General Aviation", manufacturer: "Piper", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.745, telemetryBaseLng: -84.395, telemetryBaseAlt: 914, telemetryDriftRadius: 0.03 },
+  { name: "SWA3421 B737 MAX 8", id: "ADSB:AC5678", signalType: "adsb", deviceType: "Commercial Aircraft", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 0, broadcastsTelemetry: true, telemetryBaseLat: 33.710, telemetryBaseLng: -84.280, telemetryBaseAlt: 7620, telemetryDriftRadius: 0.10 },
+  { name: "LifeFlight N911LF", id: "ADSB:A45678", signalType: "adsb", deviceType: "Helicopter", manufacturer: "Airbus H145", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.758, telemetryBaseLng: -84.385, telemetryBaseAlt: 457, telemetryDriftRadius: 0.02 },
+  { name: "USAF C-17A", id: "ADSB:AE1234", signalType: "adsb", deviceType: "Military Transport", manufacturer: "Boeing", protocol: "ADS-B 1090ES", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.620, telemetryBaseLng: -84.570, telemetryBaseAlt: 8534, telemetryDriftRadius: 0.20 },
+  { name: "DJI Mavic 3 Enterprise", id: "ADSB:DJI00123", signalType: "adsb", deviceType: "UAS/Drone", manufacturer: "DJI", protocol: "Remote ID", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.752, telemetryBaseLng: -84.390, telemetryBaseAlt: 120, telemetryDriftRadius: 0.005 },
+  { name: "Skydio X10", id: "ADSB:SKY00456", signalType: "adsb", deviceType: "UAS/Drone", manufacturer: "Skydio", protocol: "Remote ID", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.748, telemetryBaseLng: -84.392, telemetryBaseAlt: 90, telemetryDriftRadius: 0.004 },
+  { name: "Autel EVO II Pro", id: "ADSB:AUT00789", signalType: "adsb", deviceType: "UAS/Drone", manufacturer: "Autel", protocol: "Remote ID", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.755, telemetryBaseLng: -84.383, telemetryBaseAlt: 100, telemetryDriftRadius: 0.003 },
+  { name: "Wing Delivery Drone", id: "ADSB:WNG00321", signalType: "adsb", deviceType: "UAS/Drone", manufacturer: "Wing (Alphabet)", protocol: "Remote ID", frequency: 1090000000, channel: null, encryption: "None", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.740, telemetryBaseLng: -84.405, telemetryBaseAlt: 60, telemetryDriftRadius: 0.008 },
 ];
 
 const SENSOR_DEVICE_POOL: DeviceTemplate[] = [
@@ -241,15 +250,35 @@ interface ProgressiveState {
   seenCount: Map<string, number>;
 }
 
+function generateTelemetryPosition(template: DeviceTemplate): { lat: number; lng: number; alt: number | null } | null {
+  if (!template.broadcastsTelemetry || template.telemetryBaseLat == null || template.telemetryBaseLng == null) return null;
+  const drift = template.telemetryDriftRadius || 0.001;
+  const angle = Math.random() * 2 * Math.PI;
+  const r = drift * Math.sqrt(Math.random());
+  return {
+    lat: template.telemetryBaseLat + r * Math.cos(angle),
+    lng: template.telemetryBaseLng + r * Math.sin(angle),
+    alt: template.telemetryBaseAlt != null ? template.telemetryBaseAlt + (Math.random() - 0.5) * 20 : null,
+  };
+}
+
+const TELEMETRY_SIGNAL_TYPES = new Set(["lora", "meshtastic", "adsb"]);
+
 function buildPartialNode(template: DeviceTemplate, state: ProgressiveState): DiscoveredNode {
   const seen = state.seenCount.get(template.id) || 0;
   state.seenCount.set(template.id, seen + 1);
 
   const resolved = seen >= template.resolveDelay;
+  const isMeshType = TELEMETRY_SIGNAL_TYPES.has(template.signalType);
+  const hasShortLong = isMeshType && template.shortName && template.longName;
+
+  const telemetry = template.broadcastsTelemetry ? generateTelemetryPosition(template) : null;
+  const hasTelemetry = telemetry != null;
 
   if (resolved) {
+    const displayName = hasShortLong ? `${template.longName} (${template.shortName})` : template.name;
     return {
-      name: template.name,
+      name: displayName,
       id: template.id,
       rssi: randomRSSI(),
       signalType: template.signalType,
@@ -260,12 +289,32 @@ function buildPartialNode(template: DeviceTemplate, state: ProgressiveState): Di
       channel: template.channel,
       encryption: template.encryption,
       resolved: true,
+      shortName: template.shortName || null,
+      longName: template.longName || null,
+      broadcastLat: telemetry?.lat ?? null,
+      broadcastLng: telemetry?.lng ?? null,
+      broadcastAlt: telemetry?.alt ?? null,
+      hasTelemetry,
     };
   }
 
   const oui = template.id.split(":").slice(0, 3).join(":");
   const mfrFromOui = seen >= 1 ? template.manufacturer : "Unknown";
-  const nameLabel = mfrFromOui !== "Unknown" ? `${mfrFromOui} Device` : template.id;
+
+  let nameLabel: string;
+  let currentShort: string | null = null;
+  let currentLong: string | null = null;
+
+  if (hasShortLong) {
+    if (seen >= 1) {
+      currentShort = template.shortName!;
+      nameLabel = template.shortName!;
+    } else {
+      nameLabel = template.id;
+    }
+  } else {
+    nameLabel = mfrFromOui !== "Unknown" ? `${mfrFromOui} Device` : template.id;
+  }
 
   return {
     name: nameLabel,
@@ -279,6 +328,12 @@ function buildPartialNode(template: DeviceTemplate, state: ProgressiveState): Di
     channel: template.channel,
     encryption: seen >= 1 ? template.encryption : "Unknown",
     resolved: false,
+    shortName: currentShort,
+    longName: currentLong,
+    broadcastLat: hasTelemetry && seen >= 1 ? telemetry?.lat ?? null : null,
+    broadcastLng: hasTelemetry && seen >= 1 ? telemetry?.lng ?? null : null,
+    broadcastAlt: hasTelemetry && seen >= 1 ? telemetry?.alt ?? null : null,
+    hasTelemetry: hasTelemetry && seen >= 1,
   };
 }
 

@@ -108,7 +108,11 @@ export default function Dashboard() {
       };
       if (node.frequency) obsBody.frequency = node.frequency;
       if (node.channel) obsBody.channel = node.channel;
-      if (pos) {
+      if (node.hasTelemetry && node.broadcastLat != null && node.broadcastLng != null) {
+        obsBody.latitude = node.broadcastLat;
+        obsBody.longitude = node.broadcastLng;
+        if (node.broadcastAlt != null) obsBody.altitude = node.broadcastAlt;
+      } else if (pos) {
         obsBody.latitude = pos.lat;
         obsBody.longitude = pos.lng;
         if (pos.alt != null) obsBody.altitude = pos.alt;
@@ -344,8 +348,12 @@ export default function Dashboard() {
                           <div className="flex items-center gap-1">
                             <p className="truncate font-medium text-[11px]">{node.name}</p>
                             {!isResolved && <span className="text-[7px] text-muted-foreground italic shrink-0">resolving</span>}
+                            {node.hasTelemetry && <span className="text-[7px] text-primary shrink-0">GPS</span>}
                           </div>
-                          <p className="text-[9px] text-muted-foreground truncate">{node.id} | {node.manufacturer}</p>
+                          <p className="text-[9px] text-muted-foreground truncate">
+                            {node.id} | {node.manufacturer}
+                            {node.shortName && !node.longName && <> | SN: {node.shortName}</>}
+                          </p>
                         </div>
                         <div className="text-right shrink-0">
                           <p className="text-[10px] font-mono" style={{ color: signalColor(node.signalType) }}>
