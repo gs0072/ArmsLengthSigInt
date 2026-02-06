@@ -14,8 +14,12 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
   - Settings panel has sensor management section (add/view/delete sensors)
   - Dashboard shows sensor activation buttons (replaces old BLE Scan / Add Device buttons)
 - **Passive Monitoring**: Simulated Wireshark-style passive scanning (no Web Bluetooth pairing dialogs)
-  - `ble-scanner.ts` has `startPassiveScan()` / `stopPassiveScan()` with BLE and WiFi device pools
-  - Dashboard live signal feed shows discovered nodes in real-time during scanning
+  - `ble-scanner.ts` with 120+ device templates across 8 signal types (BLE, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, Sensor)
+  - **Progressive discovery**: nodes created immediately with MAC + RSSI, then name/manufacturer/type resolve on subsequent passes (like real scanners)
+  - Each template has a `resolveDelay` controlling how many passes before full resolution
+  - Burst emissions: initial 3-6 device burst, then 1-4 per tick at ~1.5s intervals
+  - Dashboard `persistNode` creates nodes with partial data, then PATCHes when fields resolve
+  - Live signal feed shows "resolving" indicator for unresolved nodes
   - Each discovered node is persisted to DB with GPS auto-tagging
 - **Device Associations (SIGINT Intelligence Links)**:
   - `device_associations` table tracking co-movement, signal correlation, C2, network peer, proximity, frequency, temporal patterns

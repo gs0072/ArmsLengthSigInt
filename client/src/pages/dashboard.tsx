@@ -66,18 +66,34 @@ export default function Dashboard() {
     try {
       const pos = await getCurrentPosition();
       const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(node.id)}`, { credentials: "include" });
-      const existing = await existingRes.json();
+      const existing = existingRes.ok ? await existingRes.json() : null;
       let device: Device;
 
       if (existing && existing.id) {
         device = existing;
+        if (node.resolved) {
+          const updates: Record<string, any> = {};
+          if ((!existing.name || existing.name === existing.macAddress || existing.name.endsWith(" Device")) && node.name && node.name !== node.id) {
+            updates.name = node.name;
+          }
+          if ((!existing.manufacturer || existing.manufacturer === "Unknown") && node.manufacturer && node.manufacturer !== "Unknown") {
+            updates.manufacturer = node.manufacturer;
+          }
+          if ((!existing.deviceType || existing.deviceType === "Unknown") && node.deviceType && node.deviceType !== "Unknown") {
+            updates.deviceType = node.deviceType;
+          }
+          if (Object.keys(updates).length > 0) {
+            const patchRes = await apiRequest("PATCH", `/api/devices/${existing.id}`, updates);
+            device = await patchRes.json();
+          }
+        }
       } else {
         const createRes = await apiRequest("POST", "/api/devices", {
-          name: node.name || `Unknown ${node.signalType.toUpperCase()}`,
+          name: node.name || node.id,
           macAddress: node.id,
           signalType: node.signalType,
-          deviceType: node.deviceType,
-          manufacturer: node.manufacturer,
+          deviceType: node.deviceType || "Unknown",
+          manufacturer: node.manufacturer || "Unknown",
           notes: `Passively discovered by sensor: ${sensorName}`,
         });
         device = await createRes.json();
@@ -140,7 +156,7 @@ export default function Dashboard() {
           });
           persistNode(node, sensor.name, sensor.id);
         },
-        3000
+        1500
       );
       sessionsRef.current.push(session);
     }
@@ -316,15 +332,19 @@ export default function Dashboard() {
                 <div className="flex flex-col gap-1" data-testid="scan-feed-list">
                   {scanFeed.map((node, i) => {
                     const SIcon = sensorTypeIcons[node.signalType] || Radar;
+                    const isResolved = "resolved" in node && node.resolved;
                     return (
                       <div
                         key={node.id}
-                        className="flex items-center gap-2 p-2 rounded-md border border-primary/20 bg-primary/5 text-xs animate-in fade-in slide-in-from-top-1 duration-300"
+                        className={`flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 ${isResolved ? "border-primary/30 bg-primary/5" : "border-muted-foreground/20 bg-muted/10"}`}
                         data-testid={`scan-feed-item-${i}`}
                       >
                         <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(node.signalType) }} />
                         <div className="flex-1 min-w-0">
-                          <p className="truncate font-medium text-[11px]">{node.name}</p>
+                          <div className="flex items-center gap-1">
+                            <p className="truncate font-medium text-[11px]">{node.name}</p>
+                            {!isResolved && <span className="text-[7px] text-muted-foreground italic shrink-0">resolving</span>}
+                          </div>
                           <p className="text-[9px] text-muted-foreground truncate">{node.id} | {node.manufacturer}</p>
                         </div>
                         <div className="text-right shrink-0">
