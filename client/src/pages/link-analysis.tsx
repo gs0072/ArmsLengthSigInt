@@ -112,20 +112,32 @@ export default function LinkAnalysisPage() {
         credentials: "include",
         signal: abortControllerRef.current.signal,
       });
-      if (!res.ok) throw new Error("Analysis failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || "Analysis failed");
+      }
       return res.json();
     },
     onSuccess: (data: any) => {
       setIsAnalyzing(false);
       abortControllerRef.current = null;
       queryClient.invalidateQueries({ queryKey: ["/api/associations"] });
-      toast({ title: "Analysis Complete", description: `Found ${data.newAssociations} new associations across ${data.analyzed} nodes.` });
+      if (data.timedOut) {
+        toast({
+          title: "Analysis Timed Out",
+          description: `Found ${data.newAssociations} associations before the ${data.timeoutSeconds}s limit. Upgrade to Enterprise for unlimited analysis.`,
+        });
+      } else {
+        toast({ title: "Analysis Complete", description: `Found ${data.newAssociations} new associations across ${data.analyzed} nodes.` });
+      }
     },
     onError: (err: any) => {
       setIsAnalyzing(false);
       abortControllerRef.current = null;
       if (err.name === "AbortError") {
         toast({ title: "Analysis Stopped", description: "The analysis was cancelled." });
+      } else {
+        toast({ title: "Analysis Failed", description: String(err.message || "An error occurred"), variant: "destructive" });
       }
     },
   });

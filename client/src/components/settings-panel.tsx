@@ -13,6 +13,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { AddSensorDialog } from "./add-sensor-dialog";
 import type { UserProfile, CollectionSensor, TrustedUser } from "@shared/schema";
+import { getTierFeatures, FEATURE_LABELS, type TierFeatures } from "@shared/tier-features";
 
 interface SettingsPanelProps {
   dataMode: string;
@@ -46,6 +47,7 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
   const { toast } = useToast();
 
   const isAdmin = userTier === "admin";
+  const tierConfig = getTierFeatures(userTier);
 
   const { data: trustedUsers = [] } = useQuery<TrustedUser[]>({
     queryKey: ["/api/trusted-users"],
@@ -227,6 +229,49 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
           <p className="text-[10px] text-muted-foreground" data-testid="text-tier-description">
             {tierDescriptions[userTier] || "Unknown tier"}
           </p>
+
+          <div className="mt-2 space-y-1">
+            <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">Tier Features</p>
+            <div className="grid grid-cols-2 gap-1">
+              {(Object.keys(FEATURE_LABELS) as Array<keyof TierFeatures["features"]>).map((featureKey) => {
+                const enabled = tierConfig.features[featureKey];
+                const info = FEATURE_LABELS[featureKey];
+                return (
+                  <div
+                    key={featureKey}
+                    className={`flex items-center gap-1.5 p-1.5 rounded text-[9px] ${enabled ? "text-foreground" : "text-muted-foreground/40"}`}
+                    title={info.description}
+                    data-testid={`feature-${featureKey}`}
+                  >
+                    {enabled ? (
+                      <Check className="w-3 h-3 text-green-500 shrink-0" />
+                    ) : (
+                      <X className="w-3 h-3 text-muted-foreground/30 shrink-0" />
+                    )}
+                    <span className="truncate">{info.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1.5 text-[9px] text-muted-foreground">
+              <div className="flex justify-between gap-1">
+                <span>Max Devices</span>
+                <span className="font-mono">{tierConfig.maxDevices < 0 ? "Unlimited" : tierConfig.maxDevices}</span>
+              </div>
+              <div className="flex justify-between gap-1">
+                <span>Max Sensors</span>
+                <span className="font-mono">{tierConfig.maxSensors < 0 ? "Unlimited" : tierConfig.maxSensors}</span>
+              </div>
+              <div className="flex justify-between gap-1">
+                <span>Trusted Users</span>
+                <span className="font-mono">{tierConfig.maxTrustedUsers < 0 ? "Unlimited" : tierConfig.maxTrustedUsers}</span>
+              </div>
+              <div className="flex justify-between gap-1">
+                <span>Analysis Time</span>
+                <span className="font-mono">{tierConfig.analysisTimeoutSeconds < 0 ? "Unlimited" : `${tierConfig.analysisTimeoutSeconds}s`}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <GlowLine />
@@ -266,10 +311,18 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="local">Local Collections Only</SelectItem>
-              <SelectItem value="friends">Friends & Trusted Users</SelectItem>
-              <SelectItem value="public">Public Shared Data</SelectItem>
-              <SelectItem value="osint">Open Source Datasets</SelectItem>
-              <SelectItem value="combined">Combined / All Sources</SelectItem>
+              <SelectItem value="friends" disabled={!tierConfig.allowedDataModes.includes("friends")}>
+                Friends & Trusted Users {!tierConfig.allowedDataModes.includes("friends") ? "(Basic+)" : ""}
+              </SelectItem>
+              <SelectItem value="public" disabled={!tierConfig.allowedDataModes.includes("public")}>
+                Public Shared Data {!tierConfig.allowedDataModes.includes("public") ? "(Professional+)" : ""}
+              </SelectItem>
+              <SelectItem value="osint" disabled={!tierConfig.allowedDataModes.includes("osint")}>
+                Open Source Datasets {!tierConfig.allowedDataModes.includes("osint") ? "(Enterprise+)" : ""}
+              </SelectItem>
+              <SelectItem value="combined" disabled={!tierConfig.allowedDataModes.includes("combined")}>
+                Combined / All Sources {!tierConfig.allowedDataModes.includes("combined") ? "(Enterprise+)" : ""}
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">

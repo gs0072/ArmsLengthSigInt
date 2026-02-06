@@ -32,6 +32,9 @@ The platform is built with a React + TypeScript frontend utilizing Tailwind CSS,
 - **UI/UX:** Dark cyberpunk-themed interface with cyan primary color, purple accents, and JetBrains Mono font. Responsive design with multi-monitor support.
 - **Terminology:** "Nodes" refers to detected signals/devices, "Sensors" to collection hardware.
 - **Backend Validation:** Zod schemas are used for input validation on POST routes (e.g., `createDeviceSchema`, `createObservationSchema`, `createSensorSchema`).
+- **Tier Feature System:** Five-tier system (Free, Basic, Professional, Enterprise, Admin) with per-tier feature gating defined in `shared/tier-features.ts`. Tiers control: max devices/sensors/trusted users, analysis timeout (45s for non-enterprise, unlimited for enterprise/admin), allowed data modes, and feature access (link analysis, AI analysis, triangulation, OSINT, export/import, etc.). Admins can set user tiers in Settings. Backend enforces tier restrictions on analysis and AI endpoints.
+- **Frequency Sharing Analysis:** Only applies to SDR signal types. WiFi, Bluetooth, LoRa, Meshtastic, ADS-B, and RFID frequency matches are excluded since they use standard bands.
+- **Data Mode Persistence:** Data mode selection in Settings saves to user profile via PATCH /api/profile and is validated against tier-allowed modes.
 
 ## External Dependencies
 - **Database:** PostgreSQL

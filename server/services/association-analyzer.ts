@@ -403,6 +403,12 @@ function analyzeFrequencySignature(
   obs1: Observation[], obs2: Observation[],
   _allObservations: Observation[]
 ): AnalysisResult | null {
+  const SDR_ELIGIBLE_TYPES = new Set(["sdr", "unknown", "sensor"]);
+  const hasSDREligible = SDR_ELIGIBLE_TYPES.has(device1.signalType) || SDR_ELIGIBLE_TYPES.has(device2.signalType);
+  if (!hasSDREligible) {
+    return null;
+  }
+
   const freq1 = obs1.filter(o => o.frequency != null);
   const freq2 = obs2.filter(o => o.frequency != null);
   if (freq1.length < 2 || freq2.length < 2) return null;

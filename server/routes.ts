@@ -11,6 +11,7 @@ import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus } fro
 import { getSystemCapabilities } from "./services/system-info";
 import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
 import { matchDeviceToSignature, DEVICE_BROADCAST_SIGNATURES_SERVER } from "./services/signature-matcher";
+import { getTierFeatures, isFeatureAllowed, isDataModeAllowed, TIER_FEATURES, FEATURE_LABELS } from "../shared/tier-features";
 
 const updateProfileSchema = z.object({
   dataMode: z.enum(["local", "friends", "public", "osint", "combined"]).optional(),
@@ -295,7 +296,12 @@ export async function registerRoutes(
       const existing = await storage.getUserProfile(userId);
       if (!existing) return res.status(404).json({ message: "Profile not found" });
       const updates: Record<string, any> = {};
-      if (parsed.data.dataMode) updates.dataMode = parsed.data.dataMode;
+      if (parsed.data.dataMode) {
+        if (!isDataModeAllowed(existing.tier, parsed.data.dataMode)) {
+          return res.status(403).json({ message: `Data mode '${parsed.data.dataMode}' is not available on your current tier. Upgrade to access more data modes.` });
+        }
+        updates.dataMode = parsed.data.dataMode;
+      }
       if (parsed.data.settings) updates.settings = parsed.data.settings;
       const updated = await storage.upsertUserProfile({ ...existing, ...updates, userId });
       res.json(updated);
@@ -303,6 +309,16 @@ export async function registerRoutes(
       console.error("Error updating profile:", error);
       res.status(500).json({ message: "Failed to update profile" });
     }
+  });
+
+  app.get("/api/tier-features", (_req: any, res) => {
+    res.json({ tiers: TIER_FEATURES, featureLabels: FEATURE_LABELS });
+  });
+
+  app.get("/api/tier-features/:tier", (req: any, res) => {
+    const tier = req.params.tier;
+    const features = getTierFeatures(tier);
+    res.json(features);
   });
 
   app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
@@ -462,6 +478,11 @@ export async function registerRoutes(
   app.post("/api/devices/:id/analyze", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      const profile = await storage.getUserProfile(userId);
+      const tier = profile?.tier || "free";
+      if (!isFeatureAllowed(tier, "aiAnalysis")) {
+        return res.status(403).json({ message: "AI analysis is not available on your current tier. Upgrade to Professional or higher." });
+      }
       const deviceId = parseInt(req.params.id);
       const device = await storage.getDevice(deviceId);
       if (!device || device.userId !== userId) {
@@ -872,6 +893,19 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
   app.post("/api/associations/analyze", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      const profile = await storage.getUserProfile(userId);
+      const tier = profile?.tier || "free";
+      const tierConfig = getTierFeatures(tier);
+
+      if (!isFeatureAllowed(tier, "linkAnalysis")) {
+        return res.status(403).json({ message: "Link analysis is not available on your current tier. Upgrade to Basic or higher." });
+      }
+
+      const startTime = Date.now();
+      const timeoutMs = tierConfig.analysisTimeoutSeconds > 0
+        ? tierConfig.analysisTimeoutSeconds * 1000
+        : 0;
+
       const userDevices = await storage.getDevices(userId);
       const userObservations = await storage.getObservations(userId);
       const existing = await storage.getAssociations(userId);
@@ -879,7 +913,12 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
       const results = analyzeDeviceAssociations(userDevices, userObservations, existing);
 
       const created = [];
+      let timedOut = false;
       for (const r of results) {
+        if (timeoutMs > 0 && (Date.now() - startTime) > timeoutMs) {
+          timedOut = true;
+          break;
+        }
         const assoc = await storage.createAssociation({
           userId,
           deviceId1: r.deviceId1,
@@ -894,8 +933,15 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
         created.push(assoc);
       }
 
-      await storage.logActivity(userId, "association_analysis", `Analyzed ${userDevices.length} devices, found ${created.length} new associations`);
-      res.json({ analyzed: userDevices.length, newAssociations: created.length, associations: created });
+      await storage.logActivity(userId, "association_analysis", `Analyzed ${userDevices.length} devices, found ${created.length} new associations${timedOut ? ` (timed out at ${tierConfig.analysisTimeoutSeconds}s)` : ""}`);
+      res.json({
+        analyzed: userDevices.length,
+        newAssociations: created.length,
+        associations: created,
+        timedOut,
+        timeoutSeconds: tierConfig.analysisTimeoutSeconds,
+        tier,
+      });
     } catch (error) {
       console.error("Error analyzing associations:", error);
       res.status(500).json({ message: "Association analysis failed" });
