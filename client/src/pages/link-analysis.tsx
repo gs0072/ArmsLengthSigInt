@@ -524,19 +524,32 @@ export default function LinkAnalysisPage() {
                     const linkedId = assoc.deviceId1 === selectedNode.id ? assoc.deviceId2 : assoc.deviceId1;
                     const linked = devices.find(d => d.id === linkedId);
                     const typeColor = ASSOC_TYPE_COLORS[assoc.associationType] || "#778899";
+                    const evidence = assoc.evidence as Record<string, unknown> | null;
+                    const confidenceLevel = (evidence?.confidenceLevel as string) || "";
+                    const lr: number = Number(evidence?.likelihoodRatio) || 0;
+                    const levelLabels: Record<string, string> = {
+                      almost_certain: "Almost Certain", highly_likely: "Highly Likely",
+                      likely: "Likely", possible: "Possible", unlikely: "Unlikely",
+                    };
+                    const levelLabel = levelLabels[confidenceLevel] || `${Math.round(assoc.confidence)}%`;
                     return (
                       <div key={assoc.id} className="p-2 rounded-md bg-muted/20 space-y-1" data-testid={`inspector-assoc-${assoc.id}`}>
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[10px] font-medium truncate">{linked?.name || `Node #${linkedId}`}</span>
                           <Badge variant="outline" className="text-[8px]" style={{ borderColor: typeColor, color: typeColor }}>
-                            {Math.round(assoc.confidence)}%
+                            {levelLabel}
                           </Badge>
                         </div>
-                        <Badge variant="secondary" className="text-[7px]" style={{ backgroundColor: `${typeColor}20`, color: typeColor }}>
-                          {ASSOC_TYPE_LABELS[assoc.associationType]}
-                        </Badge>
-                        {assoc.reasoning && (
-                          <p className="text-[9px] text-muted-foreground leading-snug mt-1">{assoc.reasoning}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Badge variant="secondary" className="text-[7px]" style={{ backgroundColor: `color-mix(in srgb, ${typeColor} 15%, transparent)`, color: typeColor }}>
+                            {ASSOC_TYPE_LABELS[assoc.associationType]}
+                          </Badge>
+                          {typeof lr === "number" && lr > 0 && (
+                            <span className="text-[8px] text-muted-foreground font-mono">LR {lr.toFixed(1)}:1</span>
+                          )}
+                        </div>
+                        {evidence?.method && (
+                          <p className="text-[8px] text-muted-foreground/70 italic">{evidence.method as string}</p>
                         )}
                       </div>
                     );

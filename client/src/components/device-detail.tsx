@@ -12,11 +12,12 @@ import { GlowLine } from "./scan-animation";
 import { AddObservationDialog } from "./add-observation-dialog";
 import {
   X, Eye, EyeOff, Flag, MapPin, Clock, Radio, Link2,
-  FileText, AlertTriangle, Globe, Fingerprint, Copy, ExternalLink, Brain, Plus, Scan, Zap
+  FileText, AlertTriangle, Globe, Fingerprint, Copy, ExternalLink, Brain, Plus, Scan, Zap,
+  TrendingUp, BarChart3, Target
 } from "lucide-react";
 import { useLocation } from "wouter";
 import type { Device, Observation, DeviceAssociation } from "@shared/schema";
-import { timeAgo, formatCoordinates, formatFrequency, getSignalLabel } from "@/lib/signal-utils";
+import { timeAgo, formatCoordinates, formatFrequency, getSignalLabel, getSignalColor } from "@/lib/signal-utils";
 import { useToast } from "@/hooks/use-toast";
 
 const ASSOC_TYPE_LABELS: Record<string, string> = {
@@ -41,10 +42,37 @@ const ASSOC_TYPE_COLORS: Record<string, string> = {
   manual: "hsl(200, 20%, 50%)",
 };
 
-function getConfidenceColor(confidence: number): string {
-  if (confidence >= 80) return "hsl(142, 76%, 48%)";
-  if (confidence >= 60) return "hsl(45, 90%, 55%)";
-  if (confidence >= 40) return "hsl(25, 85%, 55%)";
+const CONFIDENCE_LEVEL_LABELS: Record<string, string> = {
+  almost_certain: "Almost Certain",
+  highly_likely: "Highly Likely",
+  likely: "Likely",
+  possible: "Possible",
+  unlikely: "Unlikely",
+};
+
+const PROBABILITY_SCALE_LABELS: Record<string, string> = {
+  very_high: "Very High",
+  high: "High",
+  moderate: "Moderate",
+  low: "Low",
+  negligible: "Negligible",
+};
+
+function getConfidenceLevelColor(level: string): string {
+  switch (level) {
+    case "almost_certain": return "hsl(142, 76%, 48%)";
+    case "highly_likely": return "hsl(142, 60%, 55%)";
+    case "likely": return "hsl(45, 90%, 55%)";
+    case "possible": return "hsl(25, 85%, 55%)";
+    default: return "hsl(0, 72%, 55%)";
+  }
+}
+
+function getProbabilityColor(prob: number): string {
+  if (prob >= 0.85) return "hsl(142, 76%, 48%)";
+  if (prob >= 0.65) return "hsl(142, 60%, 55%)";
+  if (prob >= 0.45) return "hsl(45, 90%, 55%)";
+  if (prob >= 0.25) return "hsl(25, 85%, 55%)";
   return "hsl(0, 72%, 55%)";
 }
 
@@ -81,7 +109,7 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/associations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/associations/device", device.id] });
-      toast({ title: "Analysis Complete", description: "Association analysis finished." });
+      toast({ title: "Analysis Complete", description: "SIGINT association analysis finished." });
     },
   });
 
@@ -275,7 +303,6 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
                       onClick={() => analyzeMutation.mutate()}
                       disabled={analyzeMutation.isPending}
                       data-testid="button-run-analysis"
-                      className="text-[10px] h-7"
                     >
                       <Scan className="w-3 h-3 mr-1" />
                       {analyzeMutation.isPending ? "Analyzing..." : "Run Analysis"}
@@ -285,14 +312,19 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
                   {associations.length === 0 ? (
                     <div className="text-center py-6 space-y-2">
                       <Link2 className="w-8 h-8 mx-auto text-muted-foreground/30" />
-                      <p className="text-xs text-muted-foreground">No associations detected yet</p>
-                      <p className="text-[10px] text-muted-foreground/60">Run analysis to detect co-movement, signal correlation, and other SIGINT patterns</p>
+                      <p className="text-xs text-muted-foreground">No associations detected</p>
+                      <p className="text-[10px] text-muted-foreground/60">Run analysis to detect statistically significant SIGINT patterns across multiple collection sites</p>
                     </div>
                   ) : (
                     associations.map(assoc => {
                       const linked = getLinkedDevice(assoc);
                       const typeColor = ASSOC_TYPE_COLORS[assoc.associationType] || "hsl(200, 20%, 50%)";
-                      const confColor = getConfidenceColor(assoc.confidence);
+                      const evidence = assoc.evidence as Record<string, unknown> | null;
+                      const confidenceLevel = evidence?.confidenceLevel as string || "";
+                      const posterior = (evidence?.posteriorProbability as number) || assoc.confidence / 100;
+                      const levelColor = getConfidenceLevelColor(confidenceLevel);
+                      const levelLabel = CONFIDENCE_LEVEL_LABELS[confidenceLevel] || `${Math.round(assoc.confidence)}%`;
+
                       return (
                         <button
                           key={assoc.id}
@@ -302,21 +334,24 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <Zap className="w-3.5 h-3.5 shrink-0" style={{ color: typeColor }} />
+                              <Radio className="w-3.5 h-3.5 shrink-0" style={{ color: typeColor }} />
                               <span className="text-xs font-medium truncate">
                                 {linked?.name || `Node #${assoc.deviceId1 === device.id ? assoc.deviceId2 : assoc.deviceId1}`}
                               </span>
+                              {linked && <SignalBadge type={linked.signalType} size="sm" />}
                             </div>
-                            <Badge variant="outline" className="text-[8px] shrink-0" style={{ borderColor: confColor, color: confColor }}>
-                              {Math.round(assoc.confidence)}%
-                            </Badge>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="text-[8px]" style={{ backgroundColor: `${typeColor}20`, color: typeColor }}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="secondary" className="text-[8px]" style={{ backgroundColor: `color-mix(in srgb, ${typeColor} 15%, transparent)`, color: typeColor }}>
                               {ASSOC_TYPE_LABELS[assoc.associationType] || assoc.associationType}
                             </Badge>
-                            {linked && (
-                              <SignalBadge type={linked.signalType} size="sm" />
+                            <Badge variant="outline" className="text-[8px]" style={{ borderColor: levelColor, color: levelColor }}>
+                              {levelLabel}
+                            </Badge>
+                            {typeof evidence?.likelihoodRatio === "number" && evidence.likelihoodRatio > 0 && (
+                              <span className="text-[9px] text-muted-foreground font-mono">
+                                LR {evidence.likelihoodRatio.toFixed(1)}:1
+                              </span>
                             )}
                           </div>
                         </button>
@@ -331,17 +366,18 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
       </Card>
 
       <Dialog open={!!selectedAssociation} onOpenChange={() => setSelectedAssociation(null)}>
-        <DialogContent className="max-w-md" data-testid="dialog-association-detail">
+        <DialogContent className="max-w-lg" data-testid="dialog-association-detail">
           {selectedAssociation && (
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-sm">
-                  <Link2 className="w-4 h-4 text-primary" />
-                  Association Detail
+                  <Target className="w-4 h-4 text-primary" />
+                  SIGINT Association Intelligence
                 </DialogTitle>
               </DialogHeader>
               <AssociationDetailContent
                 association={selectedAssociation}
+                currentDevice={device}
                 device1={allDevices.find(d => d.id === selectedAssociation.deviceId1)}
                 device2={allDevices.find(d => d.id === selectedAssociation.deviceId2)}
               />
@@ -353,49 +389,133 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
   );
 }
 
+function MiniLinkDiagram({
+  device1,
+  device2,
+  typeColor,
+  associationType,
+}: {
+  device1?: Device;
+  device2?: Device;
+  typeColor: string;
+  associationType: string;
+}) {
+  const d1Color = device1 ? getSignalColor(device1.signalType) : "hsl(200, 20%, 50%)";
+  const d2Color = device2 ? getSignalColor(device2.signalType) : "hsl(200, 20%, 50%)";
+
+  return (
+    <div className="flex items-center justify-center gap-1 py-3" data-testid="mini-link-diagram">
+      <div className="flex flex-col items-center gap-1 min-w-0 max-w-[120px]">
+        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ border: `2px solid ${d1Color}`, backgroundColor: `color-mix(in srgb, ${d1Color} 10%, transparent)` }}>
+          <Radio className="w-4 h-4" style={{ color: d1Color }} />
+        </div>
+        <p className="text-[10px] font-medium truncate w-full text-center">{device1?.name || "Unknown"}</p>
+        <p className="text-[8px] text-muted-foreground">{device1?.signalType?.toUpperCase()}</p>
+      </div>
+
+      <div className="flex flex-col items-center gap-0.5 px-2">
+        <div className="w-16 h-0.5 rounded" style={{ background: typeColor }} />
+        <Badge variant="secondary" className="text-[7px] px-1" style={{ backgroundColor: `color-mix(in srgb, ${typeColor} 15%, transparent)`, color: typeColor }}>
+          {ASSOC_TYPE_LABELS[associationType] || associationType}
+        </Badge>
+        <div className="w-16 h-0.5 rounded" style={{ background: typeColor }} />
+      </div>
+
+      <div className="flex flex-col items-center gap-1 min-w-0 max-w-[120px]">
+        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ border: `2px solid ${d2Color}`, backgroundColor: `color-mix(in srgb, ${d2Color} 10%, transparent)` }}>
+          <Radio className="w-4 h-4" style={{ color: d2Color }} />
+        </div>
+        <p className="text-[10px] font-medium truncate w-full text-center">{device2?.name || "Unknown"}</p>
+        <p className="text-[8px] text-muted-foreground">{device2?.signalType?.toUpperCase()}</p>
+      </div>
+    </div>
+  );
+}
+
+function ProbabilityBar({ value, color, label }: { value: number; color: string; label: string }) {
+  return (
+    <div className="space-y-1" data-testid="probability-bar">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground">{label}</span>
+        <span className="text-[10px] font-mono font-medium" style={{ color }}>{(value * 100).toFixed(1)}%</span>
+      </div>
+      <div className="w-full h-1.5 bg-muted/30 rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, value * 100)}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
 function AssociationDetailContent({
   association,
+  currentDevice,
   device1,
   device2,
 }: {
   association: DeviceAssociation;
+  currentDevice: Device;
   device1?: Device;
   device2?: Device;
 }) {
   const typeColor = ASSOC_TYPE_COLORS[association.associationType] || "hsl(200, 20%, 50%)";
-  const confColor = getConfidenceColor(association.confidence);
   const evidence = association.evidence as Record<string, unknown> | null;
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-center gap-3 py-2">
-        <div className="text-center">
-          <div className="w-10 h-10 rounded-full bg-muted/30 flex items-center justify-center mx-auto mb-1" style={{ borderColor: typeColor, borderWidth: 2 }}>
-            <Radio className="w-4 h-4 text-primary" />
-          </div>
-          <p className="text-[10px] font-medium truncate max-w-[100px]">{device1?.name || `#${association.deviceId1}`}</p>
-          <p className="text-[8px] text-muted-foreground">{device1?.signalType?.toUpperCase()}</p>
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          <div className="h-0.5 w-12 rounded" style={{ background: typeColor }} />
-          <Badge variant="outline" className="text-[8px]" style={{ borderColor: confColor, color: confColor }}>
-            {Math.round(association.confidence)}% confidence
-          </Badge>
-        </div>
-        <div className="text-center">
-          <div className="w-10 h-10 rounded-full bg-muted/30 flex items-center justify-center mx-auto mb-1" style={{ borderColor: typeColor, borderWidth: 2 }}>
-            <Radio className="w-4 h-4 text-primary" />
-          </div>
-          <p className="text-[10px] font-medium truncate max-w-[100px]">{device2?.name || `#${association.deviceId2}`}</p>
-          <p className="text-[8px] text-muted-foreground">{device2?.signalType?.toUpperCase()}</p>
-        </div>
-      </div>
+  const method = (evidence?.method as string) || "Statistical Analysis";
+  const methodDesc = (evidence?.methodDescription as string) || "";
+  const lr = (evidence?.likelihoodRatio as number) || 1;
+  const posterior = (evidence?.posteriorProbability as number) || association.confidence / 100;
+  const confidenceLevel = (evidence?.confidenceLevel as string) || "possible";
+  const probabilityScale = (evidence?.probabilityScale as string) || "moderate";
+  const sampleSize = (evidence?.sampleSize as number) || 0;
+  const df = (evidence?.degreesOfFreedom as number) || 0;
+  const nullH = (evidence?.nullHypothesis as string) || "";
+  const altH = (evidence?.alternativeHypothesis as string) || "";
+  const testStat = (evidence?.testStatistic as number) || 0;
+  const pValue = (evidence?.pValue as number) || 1;
+  const obs = (evidence?.observations as Record<string, unknown>) || {};
 
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="text-[9px]" style={{ backgroundColor: `${typeColor}20`, color: typeColor }}>
-            {ASSOC_TYPE_LABELS[association.associationType]}
-          </Badge>
+  const levelColor = getConfidenceLevelColor(confidenceLevel);
+  const probColor = getProbabilityColor(posterior);
+  const levelLabel = CONFIDENCE_LEVEL_LABELS[confidenceLevel] || confidenceLevel;
+  const scaleLabel = PROBABILITY_SCALE_LABELS[probabilityScale] || probabilityScale;
+
+  return (
+    <ScrollArea className="max-h-[70vh]">
+      <div className="space-y-4 pr-2">
+        <MiniLinkDiagram
+          device1={device1}
+          device2={device2}
+          typeColor={typeColor}
+          associationType={association.associationType}
+        />
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="p-2 rounded-md bg-muted/20 text-center">
+            <TrendingUp className="w-3.5 h-3.5 mx-auto mb-1 text-primary" />
+            <p className="text-[9px] text-muted-foreground">Likelihood Ratio</p>
+            <p className="text-sm font-mono font-semibold" style={{ color: probColor }}>{lr.toFixed(1)}:1</p>
+          </div>
+          <div className="p-2 rounded-md bg-muted/20 text-center">
+            <BarChart3 className="w-3.5 h-3.5 mx-auto mb-1 text-primary" />
+            <p className="text-[9px] text-muted-foreground">Confidence</p>
+            <p className="text-xs font-semibold" style={{ color: levelColor }}>{levelLabel}</p>
+          </div>
+          <div className="p-2 rounded-md bg-muted/20 text-center">
+            <Target className="w-3.5 h-3.5 mx-auto mb-1 text-primary" />
+            <p className="text-[9px] text-muted-foreground">Probability</p>
+            <p className="text-xs font-semibold" style={{ color: probColor }}>{scaleLabel}</p>
+          </div>
+        </div>
+
+        <ProbabilityBar value={posterior} color={probColor} label="Posterior Probability" />
+
+        <div className="p-3 rounded-md bg-muted/20 border border-border/30">
+          <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
+            <Scan className="w-3 h-3" />
+            Statistical Method
+          </h4>
+          <p className="text-xs font-medium mb-1" style={{ color: typeColor }}>{method}</p>
+          {methodDesc && <p className="text-[10px] text-muted-foreground leading-relaxed">{methodDesc}</p>}
         </div>
 
         {association.reasoning && (
@@ -405,14 +525,46 @@ function AssociationDetailContent({
           </div>
         )}
 
-        {evidence && Object.keys(evidence).length > 0 && (
+        <div className="p-3 rounded-md bg-muted/20 border border-border/30">
+          <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Hypothesis Test</h4>
+          <div className="space-y-2">
+            <div>
+              <span className="text-[9px] text-muted-foreground">H0 (Null):</span>
+              <p className="text-[10px] leading-relaxed">{nullH}</p>
+            </div>
+            <div>
+              <span className="text-[9px] text-muted-foreground">H1 (Alternative):</span>
+              <p className="text-[10px] leading-relaxed">{altH}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <div>
+                <span className="text-[9px] text-muted-foreground">Test Statistic</span>
+                <p className="text-[10px] font-mono">{testStat.toFixed(3)}</p>
+              </div>
+              <div>
+                <span className="text-[9px] text-muted-foreground">p-Value</span>
+                <p className="text-[10px] font-mono" style={{ color: pValue < 0.05 ? "hsl(142, 76%, 48%)" : pValue < 0.10 ? "hsl(45, 90%, 55%)" : "hsl(0, 72%, 55%)" }}>
+                  {pValue < 0.0001 ? "<0.0001" : pValue.toFixed(4)}
+                </p>
+              </div>
+              <div>
+                <span className="text-[9px] text-muted-foreground">Sample Size</span>
+                <p className="text-[10px] font-mono">n={sampleSize} (df={df})</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {Object.keys(obs).length > 0 && (
           <div className="p-3 rounded-md bg-muted/20 border border-border/30">
-            <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Evidence</h4>
-            <div className="space-y-1">
-              {Object.entries(evidence).map(([key, value]) => (
-                <div key={key} className="flex justify-between gap-2 text-xs">
+            <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Observation Data</h4>
+            <div className="space-y-0.5">
+              {Object.entries(obs).map(([key, value]) => (
+                <div key={key} className="flex justify-between gap-2 text-[10px]">
                   <span className="text-muted-foreground capitalize">{key.replace(/([A-Z])/g, " $1").replace(/_/g, " ").trim()}</span>
-                  <span className="font-mono text-right truncate max-w-[180px]">{String(value)}</span>
+                  <span className="font-mono text-right truncate max-w-[180px]">
+                    {Array.isArray(value) ? value.join(", ") : String(value)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -430,7 +582,7 @@ function AssociationDetailContent({
           </div>
         </div>
       </div>
-    </div>
+    </ScrollArea>
   );
 }
 

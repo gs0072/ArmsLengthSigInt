@@ -19,10 +19,12 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
   - Each discovered node is persisted to DB with GPS auto-tagging
 - **Device Associations (SIGINT Intelligence Links)**:
   - `device_associations` table tracking co-movement, signal correlation, C2, network peer, proximity, frequency, temporal patterns
-  - Association analyzer service with five SIGINT algorithms: haversine distance co-movement, RSSI correlation, proximity patterns, frequency overlap, temporal activation sync
-  - Confidence scores (0-100%) with reasoning text and JSON evidence payloads
+  - Association analyzer with **static collection bias filtering** — rejects false associations from single-location scanning
+  - Requires geographic diversity (2+ unique locations per device) for spatial associations
+  - Five SIGINT algorithms: spatiotemporal distance ratio test, Pearson RSSI correlation with Fisher Z-transform, multi-site proximity likelihood ratio, RF spectrum co-channel analysis, temporal activation synchronicity test
+  - **Proper statistical output**: likelihood ratios, Bayesian posterior probability, confidence levels (almost_certain/highly_likely/likely/possible/unlikely), probability scales, p-values, hypothesis testing (H0/H1)
   - Full CRUD API (`/api/associations`) plus automated analysis endpoint (`/api/associations/analyze`)
-  - DeviceDetail Links tab shows real associations with color-coded type badges, confidence indicators, and clickable detail popups
+  - DeviceDetail Links tab: each association shows linked node name, confidence level label, LR value; clicking opens detailed popup with mini link diagram, statistical method, hypothesis test, probability bar, observation data
 - **Link Analysis Page** (/link-analysis) - Palantir-style force-directed graph visualization
   - Canvas-based interactive graph with physics simulation (repulsion + spring forces)
   - Drag nodes to rearrange, scroll to zoom, pan background
