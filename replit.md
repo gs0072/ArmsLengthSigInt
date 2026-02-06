@@ -75,7 +75,14 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - Replit Auth with user profiles and tier system
 - Dark cyberpunk-themed UI with responsive design
 - Interactive world map with device markers via Leaflet
-- Device catalog with comprehensive device categories
+- **Device Catalog with Broadcast Signatures**:
+  - DEVICE_BROADCAST_SIGNATURES database: comprehensive known broadcast names for each catalog item
+  - Pacemakers: 70+ known broadcast names (Medtronic Azure, Boston Scientific ACCOLADE, Abbott AVEIR, Biotronik Amvia, etc.)
+  - Medical devices: hearing aids (Phonak, Oticon, Signia, ReSound, Widex, Starkey), insulin pumps (Omnipod, Tandem, MiniMed), CGMs (Dexcom, FreeStyle Libre, Guardian), pulse oximeters, BP monitors
+  - All device categories have curated broadcast name lists for fast node searching
+  - Selecting a catalog item prepopulates search with all known broadcast signatures (OR matching)
+  - "Create Alert" button per catalog item to monitor for matching device detections
+  - Search page shows catalog-driven multi-term matching with signal type filtering
 - Counter-intelligence panel with following detection
 - Monitoring & alerts system
 - Seed data with realistic signal intelligence scenarios

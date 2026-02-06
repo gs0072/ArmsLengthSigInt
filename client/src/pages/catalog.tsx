@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DeviceCatalogBrowser } from "@/components/device-catalog-browser";
 import { useLocation } from "wouter";
+import type { BroadcastSignature } from "@/lib/signal-utils";
 
 export default function CatalogPage() {
   const [, setLocation] = useLocation();
@@ -12,8 +13,14 @@ export default function CatalogPage() {
       </div>
       <div className="flex-1 min-h-0">
         <DeviceCatalogBrowser
-          onSearchDevice={(term) => {
-            setLocation(`/search?q=${encodeURIComponent(term)}`);
+          onSearchDevice={(term, signature) => {
+            if (signature) {
+              const termsParam = encodeURIComponent(signature.terms.join("|"));
+              const signalParam = signature.signalTypes.length === 1 ? `&signal=${signature.signalTypes[0]}` : "";
+              setLocation(`/search?catalog=${encodeURIComponent(term)}&terms=${termsParam}${signalParam}`);
+            } else {
+              setLocation(`/search?q=${encodeURIComponent(term)}`);
+            }
           }}
         />
       </div>
