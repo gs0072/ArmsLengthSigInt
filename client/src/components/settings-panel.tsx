@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, Zap, HardDrive, Crown, UserCog } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, Zap, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Radar, Satellite, CircuitBoard, Thermometer, Usb } from "lucide-react";
 import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -27,6 +27,16 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
   const [showNotifications, setShowNotifications] = useState(true);
   const [followingDetection, setFollowingDetection] = useState(true);
   const [interrogationDetection, setInterrogationDetection] = useState(true);
+  const [hardwareSources, setHardwareSources] = useState({
+    bleAdapter: { enabled: true, label: "Bluetooth (BLE) Adapter", icon: Bluetooth, description: "Scan for BLE devices, beacons, and peripherals", interface: "USB / Built-in", color: "hsl(217, 91%, 60%)" },
+    wifiAdapter: { enabled: true, label: "Wi-Fi Adapter", icon: Wifi, description: "Monitor Wi-Fi networks, access points, and clients", interface: "USB / Built-in", color: "hsl(142, 76%, 48%)" },
+    sdrReceiver: { enabled: false, label: "SDR Receiver", icon: Antenna, description: "RTL-SDR, HackRF, or other software-defined radio", interface: "USB", color: "hsl(280, 65%, 55%)" },
+    loraRadio: { enabled: false, label: "LoRa / Meshtastic Radio", icon: Radio, description: "LoRa mesh network nodes and Meshtastic devices", interface: "USB / Serial", color: "hsl(25, 85%, 55%)" },
+    rfidReader: { enabled: false, label: "RFID Reader", icon: CircuitBoard, description: "Proxmark3, ACR122U, or other NFC/RFID readers", interface: "USB", color: "hsl(45, 90%, 55%)" },
+    adsbReceiver: { enabled: false, label: "ADS-B Receiver", icon: Satellite, description: "Aircraft transponder receiver (1090 MHz)", interface: "USB / RTL-SDR", color: "hsl(0, 72%, 55%)" },
+    gpsModule: { enabled: true, label: "GPS Module", icon: Radar, description: "Location tracking via GPS/GNSS receiver", interface: "USB / Built-in", color: "hsl(185, 100%, 50%)" },
+    externalSensors: { enabled: false, label: "External Sensors", icon: Thermometer, description: "Environmental sensors (temp, humidity, EMF)", interface: "USB / I2C / SPI", color: "hsl(320, 70%, 55%)" },
+  });
   const [signalFilters, setSignalFilters] = useState({
     bluetooth: true,
     wifi: true,
@@ -170,6 +180,72 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
           <div className="space-y-1">
             <Label className="text-xs">Scan interval: {scanInterval[0]}s</Label>
             <Slider value={scanInterval} onValueChange={setScanInterval} min={1} max={30} step={1} />
+          </div>
+        </div>
+
+        <GlowLine />
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Usb className="w-3.5 h-3.5 text-primary" />
+              <h4 className="text-xs font-medium">Hardware Sources</h4>
+            </div>
+            <Badge variant="outline" className="text-[8px] uppercase tracking-wider">
+              {Object.values(hardwareSources).filter(h => h.enabled).length} / {Object.values(hardwareSources).length} Active
+            </Badge>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Select which hardware interfaces to use for signal collection. Native companion apps required for direct hardware access.
+          </p>
+          <div className="space-y-2">
+            {Object.entries(hardwareSources).map(([key, hw]) => {
+              const IconComp = hw.icon;
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center justify-between gap-3 p-2 rounded-md border transition-colors ${
+                    hw.enabled
+                      ? "border-border/50 bg-muted/10"
+                      : "border-border/20 bg-transparent opacity-60"
+                  }`}
+                  data-testid={`hardware-${key}`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div
+                      className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: hw.enabled ? `${hw.color}` : undefined, opacity: hw.enabled ? 0.15 : 0.05 }}
+                    >
+                      <IconComp className="w-3.5 h-3.5" style={{ color: hw.enabled ? hw.color : undefined }} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-medium truncate">{hw.label}</span>
+                        {hw.enabled && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[9px] text-muted-foreground truncate">{hw.description}</p>
+                      <p className="text-[8px] text-muted-foreground/60 font-mono">{hw.interface}</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={hw.enabled}
+                    onCheckedChange={v => {
+                      setHardwareSources(prev => ({
+                        ...prev,
+                        [key]: { ...prev[key as keyof typeof prev], enabled: v },
+                      }));
+                      toast({
+                        title: v ? "Hardware Enabled" : "Hardware Disabled",
+                        description: `${hw.label} has been ${v ? "activated" : "deactivated"}.`,
+                      });
+                    }}
+                    data-testid={`switch-hardware-${key}`}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
 
