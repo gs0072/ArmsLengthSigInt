@@ -367,10 +367,11 @@ export async function registerRoutes(
       const targetUserId = req.params.targetUserId;
       const targetProfile = await storage.getUserProfile(targetUserId);
       if (!targetProfile) return res.status(404).json({ message: "User not found" });
-      const updates: any = { userId: targetUserId };
+      const { id, ...profileWithoutId } = targetProfile;
+      const updates: any = {};
       if (parsed.data.tier) updates.tier = parsed.data.tier;
       if (parsed.data.storageLimitBytes !== undefined) updates.storageLimitBytes = parsed.data.storageLimitBytes;
-      const updated = await storage.upsertUserProfile({ ...targetProfile, ...updates });
+      const updated = await storage.upsertUserProfile({ ...profileWithoutId, ...updates });
       await storage.logActivity(userId, "admin_user_update", `Updated user ${targetUserId} tier to ${req.body.tier}`);
       res.json(updated);
     } catch (error) {
