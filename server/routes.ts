@@ -10,6 +10,7 @@ import { connectToDevice, disconnectDevice, getConnections, getConnection, fetch
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
 import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
+import { matchDeviceToSignature, DEVICE_BROADCAST_SIGNATURES_SERVER } from "./services/signature-matcher";
 
 const updateProfileSchema = z.object({
   dataMode: z.enum(["local", "friends", "public", "osint", "combined"]).optional(),
@@ -108,7 +109,12 @@ export async function registerRoutes(
       const userId = req.user.claims.sub;
       const parsed = createDeviceSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
-      const device = await storage.createDevice({ ...parsed.data, userId });
+      const deviceData = { ...parsed.data, userId };
+      if (!deviceData.deviceType || deviceData.deviceType === "Unknown" || deviceData.deviceType === "unknown") {
+        const matched = matchDeviceToSignature(deviceData, DEVICE_BROADCAST_SIGNATURES_SERVER);
+        if (matched) deviceData.deviceType = matched;
+      }
+      const device = await storage.createDevice(deviceData);
       await storage.logActivity(userId, "create_device", `Created device: ${device.name || device.id}`, req.ip);
       res.status(201).json(device);
     } catch (error) {
@@ -1130,6 +1136,211 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     try {
       await storage.deleteOsintLink(parseInt(req.params.id));
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/custom-signatures", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const sigs = await storage.getCustomSignatures(userId);
+      res.json(sigs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/custom-signatures", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { category, name, terms, signalTypes, description } = req.body;
+      if (!category || !name || !terms || !signalTypes) {
+        return res.status(400).json({ message: "category, name, terms, and signalTypes are required" });
+      }
+      const sig = await storage.createCustomSignature({
+        userId,
+        category,
+        name,
+        terms: Array.isArray(terms) ? terms : [terms],
+        signalTypes: Array.isArray(signalTypes) ? signalTypes : [signalTypes],
+        description: description || null,
+      });
+      res.json(sig);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/custom-signatures/import-csv", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { category, csvData } = req.body;
+      if (!category || !csvData) {
+        return res.status(400).json({ message: "category and csvData are required" });
+      }
+      const lines = csvData.split("\n").filter((l: string) => l.trim());
+      if (lines.length < 2) {
+        return res.status(400).json({ message: "CSV must have a header row and at least one data row" });
+      }
+      const header = lines[0].toLowerCase().split(",").map((h: string) => h.trim());
+      const nameIdx = header.indexOf("name");
+      const termsIdx = header.indexOf("terms");
+      const signalIdx = header.findIndex((h: string) => h === "signaltypes" || h === "signal_types" || h === "signal types" || h === "signaltype");
+      const descIdx = header.indexOf("description");
+
+      if (nameIdx === -1 || termsIdx === -1) {
+        return res.status(400).json({ message: "CSV must have 'name' and 'terms' columns" });
+      }
+
+      const imported: any[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",").map((c: string) => c.trim());
+        const name = cols[nameIdx];
+        const terms = cols[termsIdx]?.split("|").map((t: string) => t.trim()).filter(Boolean) || [];
+        const signalTypes = signalIdx !== -1 ? cols[signalIdx]?.split("|").map((t: string) => t.trim()).filter(Boolean) || ["unknown"] : ["unknown"];
+        const description = descIdx !== -1 ? cols[descIdx] || null : null;
+
+        if (name && terms.length > 0) {
+          const sig = await storage.createCustomSignature({
+            userId,
+            category,
+            name,
+            terms,
+            signalTypes,
+            description,
+          });
+          imported.push(sig);
+        }
+      }
+      res.json({ success: true, imported: imported.length, signatures: imported });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/custom-signatures/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteCustomSignature(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/custom-signatures/category/:category", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      await storage.deleteCustomSignaturesByCategory(userId, req.params.category);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/devices/search-signature", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const termsParam = req.query.terms as string;
+      if (!termsParam) {
+        return res.status(400).json({ message: "terms parameter is required" });
+      }
+      const terms = termsParam.split("|");
+      const allDevices = await storage.getDevices(userId);
+      const matches = allDevices.filter(device => {
+        const searchableFields = [
+          device.name, device.manufacturer, device.macAddress, device.deviceType,
+          device.model, device.uuid,
+        ].filter(Boolean).map(f => f!.toLowerCase());
+        return terms.some(term => {
+          const lower = term.toLowerCase();
+          return searchableFields.some(field => field.includes(lower));
+        });
+      });
+      res.json(matches);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/devices/classify-signatures", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const allDevices = await storage.getDevices(userId);
+      const customSigs = await storage.getCustomSignatures(userId);
+      let classified = 0;
+
+      for (const device of allDevices) {
+        if (device.deviceType && device.deviceType !== "Unknown" && device.deviceType !== "unknown") continue;
+        const searchableFields = [device.name, device.manufacturer, device.macAddress, device.model, device.uuid]
+          .filter(Boolean).map(f => f!.toLowerCase());
+
+        let matched = false;
+        for (const [catalogName, sig] of Object.entries(DEVICE_BROADCAST_SIGNATURES_SERVER)) {
+          if (sig.terms.some(term => searchableFields.some(field => field.includes(term.toLowerCase())))) {
+            await storage.updateDevice(device.id, { deviceType: catalogName });
+            classified++;
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          for (const sig of customSigs) {
+            if (sig.terms && sig.terms.some(term => searchableFields.some(field => field.includes(term.toLowerCase())))) {
+              await storage.updateDevice(device.id, { deviceType: sig.name });
+              classified++;
+              break;
+            }
+          }
+        }
+      }
+      res.json({ success: true, classified, total: allDevices.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/alerts/hits", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const allAlerts = await storage.getAlerts(userId);
+      const allDevices = await storage.getDevices(userId);
+      const activeAlerts = allAlerts.filter(a => a.status === "active" || a.status === "triggered");
+
+      const hits: Array<{ alert: typeof allAlerts[0]; matchedDevices: typeof allDevices }> = [];
+
+      for (const alert of activeAlerts) {
+        const criteria = alert.criteria as any;
+        if (!criteria) continue;
+
+        let matchedDevices: typeof allDevices = [];
+
+        if (criteria.type === "catalog_broadcast_match" && criteria.terms) {
+          const terms = criteria.terms as string[];
+          matchedDevices = allDevices.filter(device => {
+            const fields = [device.name, device.manufacturer, device.macAddress, device.deviceType, device.model]
+              .filter(Boolean).map(f => f!.toLowerCase());
+            return terms.some(term => fields.some(field => field.includes(term.toLowerCase())));
+          });
+        } else if (criteria.searchTerm) {
+          const searchTerm = (criteria.searchTerm as string).toLowerCase();
+          matchedDevices = allDevices.filter(device => {
+            const fields = [device.name, device.manufacturer, device.macAddress, device.deviceType, device.model]
+              .filter(Boolean).map(f => f!.toLowerCase());
+            return fields.some(field => field.includes(searchTerm));
+          });
+        }
+
+        if (matchedDevices.length > 0) {
+          if (alert.status === "active") {
+            await storage.updateAlert(alert.id, { status: "triggered" } as any);
+            alert.status = "triggered" as any;
+          }
+          hits.push({ alert, matchedDevices });
+        }
+      }
+
+      res.json({ hits, totalHits: hits.reduce((sum, h) => sum + h.matchedDevices.length, 0) });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

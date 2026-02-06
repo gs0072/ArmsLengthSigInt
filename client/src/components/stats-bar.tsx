@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Wifi, Bluetooth, Radio, Satellite, Radar, Activity, AlertTriangle, Eye } from "lucide-react";
 import type { Device, Observation, Alert } from "@shared/schema";
 import { motion } from "framer-motion";
+import { useLocation } from "wouter";
 
 interface StatsBarProps {
   devices: Device[];
@@ -10,6 +11,11 @@ interface StatsBarProps {
 }
 
 export function StatsBar({ devices, observations, alerts }: StatsBarProps) {
+  const [, setLocation] = useLocation();
+  const activeAlerts = alerts.filter(a => a.status === "active" || a.status === "triggered");
+  const triggeredAlerts = alerts.filter(a => a.status === "triggered");
+  const hasHits = triggeredAlerts.length > 0;
+
   const stats = [
     {
       label: "Total Nodes",
@@ -55,9 +61,13 @@ export function StatsBar({ devices, observations, alerts }: StatsBarProps) {
     },
     {
       label: "Active Alerts",
-      value: alerts.filter(a => a.status === "active" || a.status === "triggered").length,
+      value: activeAlerts.length,
       icon: <AlertTriangle className="w-4 h-4" />,
-      color: "hsl(45, 90%, 55%)",
+      color: hasHits ? "hsl(0, 72%, 55%)" : "hsl(45, 90%, 55%)",
+      clickable: true,
+      onClick: () => setLocation("/monitoring"),
+      hasHits,
+      hitCount: triggeredAlerts.length,
     },
   ];
 
@@ -70,12 +80,26 @@ export function StatsBar({ devices, observations, alerts }: StatsBarProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: i * 0.05 }}
         >
-          <Card className="p-2.5 hover-elevate overflow-visible" data-testid={`stat-${stat.label.toLowerCase().replace(/[\s/]/g, "-")}`}>
+          <Card
+            className={`p-2.5 hover-elevate overflow-visible ${stat.clickable ? "cursor-pointer" : ""} ${(stat as any).hasHits ? "border-destructive/50" : ""}`}
+            onClick={(stat as any).onClick}
+            data-testid={`stat-${stat.label.toLowerCase().replace(/[\s/]/g, "-")}`}
+          >
             <div className="flex items-center gap-2">
               <div style={{ color: stat.color }}>{stat.icon}</div>
-              <div>
-                <div className="text-lg font-bold leading-none" style={{ color: stat.color }}>
-                  {stat.value}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1">
+                  <div className="text-lg font-bold leading-none" style={{ color: stat.color }}>
+                    {stat.value}
+                  </div>
+                  {(stat as any).hasHits && (
+                    <div className="flex items-center gap-0.5 ml-auto">
+                      <span className="inline-block w-2 h-2 rounded-full bg-destructive animate-pulse" />
+                      <span className="text-[8px] font-bold text-destructive uppercase">
+                        {(stat as any).hitCount} HIT{(stat as any).hitCount !== 1 ? "S" : ""}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5">
                   {stat.label}

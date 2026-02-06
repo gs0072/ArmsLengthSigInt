@@ -1,5 +1,5 @@
 import {
-  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations, trustedUsers, osintLinks,
+  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations, trustedUsers, osintLinks, customSignatures,
   type User, type UpsertUser,
   type Device, type InsertDevice,
   type Observation, type InsertObservation,
@@ -12,6 +12,7 @@ import {
   type DeviceAssociation, type InsertDeviceAssociation,
   type TrustedUser, type InsertTrustedUser,
   type OsintLink, type InsertOsintLink,
+  type CustomSignature, type InsertCustomSignature,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
@@ -69,6 +70,11 @@ export interface IStorage {
   createOsintLink(link: InsertOsintLink): Promise<OsintLink>;
   updateOsintLink(id: number, updates: Partial<InsertOsintLink>): Promise<OsintLink | undefined>;
   deleteOsintLink(id: number): Promise<void>;
+
+  getCustomSignatures(userId: string): Promise<CustomSignature[]>;
+  createCustomSignature(sig: InsertCustomSignature): Promise<CustomSignature>;
+  deleteCustomSignature(id: number): Promise<void>;
+  deleteCustomSignaturesByCategory(userId: string, category: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -293,6 +299,23 @@ export class DatabaseStorage implements IStorage {
 
   async deleteOsintLink(id: number): Promise<void> {
     await db.delete(osintLinks).where(eq(osintLinks.id, id));
+  }
+
+  async getCustomSignatures(userId: string): Promise<CustomSignature[]> {
+    return db.select().from(customSignatures).where(eq(customSignatures.userId, userId));
+  }
+
+  async createCustomSignature(sig: InsertCustomSignature): Promise<CustomSignature> {
+    const [created] = await db.insert(customSignatures).values(sig).returning();
+    return created;
+  }
+
+  async deleteCustomSignature(id: number): Promise<void> {
+    await db.delete(customSignatures).where(eq(customSignatures.id, id));
+  }
+
+  async deleteCustomSignaturesByCategory(userId: string, category: string): Promise<void> {
+    await db.delete(customSignatures).where(and(eq(customSignatures.userId, userId), eq(customSignatures.category, category)));
   }
 }
 

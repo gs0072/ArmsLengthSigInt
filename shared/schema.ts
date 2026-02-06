@@ -257,9 +257,23 @@ export type CollectionSensor = typeof collectionSensors.$inferSelect;
 export type InsertCollectionSensor = z.infer<typeof insertCollectionSensorSchema>;
 export type DeviceAssociation = typeof deviceAssociations.$inferSelect;
 export type InsertDeviceAssociation = z.infer<typeof insertDeviceAssociationSchema>;
+export const customSignatures = pgTable("custom_signatures", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  category: text("category").notNull(),
+  name: text("name").notNull(),
+  terms: text("terms").array().notNull(),
+  signalTypes: text("signal_types").array().notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertTrustedUserSchema = createInsertSchema(trustedUsers).omit({ id: true, addedAt: true });
 export const insertOsintLinkSchema = createInsertSchema(osintLinks).omit({ id: true, createdAt: true });
+export const insertCustomSignatureSchema = createInsertSchema(customSignatures).omit({ id: true, createdAt: true });
 export type TrustedUser = typeof trustedUsers.$inferSelect;
 export type InsertTrustedUser = z.infer<typeof insertTrustedUserSchema>;
 export type OsintLink = typeof osintLinks.$inferSelect;
 export type InsertOsintLink = z.infer<typeof insertOsintLinkSchema>;
+export type CustomSignature = typeof customSignatures.$inferSelect;
+export type InsertCustomSignature = z.infer<typeof insertCustomSignatureSchema>;
