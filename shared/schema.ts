@@ -160,6 +160,7 @@ export const collectionSensors = pgTable("collection_sensors", {
   sensorType: signalTypeEnum("sensor_type").notNull(),
   connectionMethod: sensorConnectionEnum("connection_method").notNull().default("builtin"),
   status: sensorStatusEnum("status").notNull().default("idle"),
+  isActive: boolean("is_active").notNull().default(false),
   config: jsonb("config"),
   notes: text("notes"),
   lastActiveAt: timestamp("last_active_at"),
