@@ -446,9 +446,20 @@ export async function registerRoutes(
         .filter(o => o.deviceId === deviceId)
         .sort((a, b) => new Date(b.observedAt!).getTime() - new Date(a.observedAt!).getTime());
 
+      const associations = await storage.getAssociationsForDevice(deviceId);
+      const allDevices = await storage.getDevices(userId);
+      const linkedDeviceIds = new Set<number>();
+      associations.forEach(a => {
+        linkedDeviceIds.add(a.deviceId1 === deviceId ? a.deviceId2 : a.deviceId1);
+      });
+      const linkedDevices = allDevices.filter(d => linkedDeviceIds.has(d.id));
+
+      const macPrefix = device.macAddress ? device.macAddress.split(":").slice(0, 3).join(":").toUpperCase() : null;
+
       const deviceData = {
         name: device.name,
         macAddress: device.macAddress,
+        macOuiPrefix: macPrefix,
         uuid: device.uuid,
         manufacturer: device.manufacturer,
         model: device.model,
@@ -461,7 +472,7 @@ export async function registerRoutes(
         notes: device.notes,
         metadata: device.metadata,
         observationCount: deviceObs.length,
-        observations: deviceObs.slice(0, 20).map(o => ({
+        observations: deviceObs.slice(0, 30).map(o => ({
           timestamp: o.observedAt,
           signalStrength: o.signalStrength,
           frequency: o.frequency,
@@ -473,6 +484,25 @@ export async function registerRoutes(
           encryption: o.encryption,
           rawData: o.rawData?.substring(0, 100),
           hexData: o.hexData?.substring(0, 100),
+        })),
+        associations: associations.map(a => ({
+          type: a.associationType,
+          confidence: a.confidence,
+          reasoning: a.reasoning,
+          linkedDeviceId: a.deviceId1 === deviceId ? a.deviceId2 : a.deviceId1,
+          linkedDeviceName: linkedDevices.find(d => d.id === (a.deviceId1 === deviceId ? a.deviceId2 : a.deviceId1))?.name || "Unknown",
+          linkedDeviceType: linkedDevices.find(d => d.id === (a.deviceId1 === deviceId ? a.deviceId2 : a.deviceId1))?.deviceType || "Unknown",
+          linkedDeviceSignalType: linkedDevices.find(d => d.id === (a.deviceId1 === deviceId ? a.deviceId2 : a.deviceId1))?.signalType || "unknown",
+          observationCount: a.observationCount,
+          isConfirmed: a.isConfirmed,
+        })),
+        linkedDevicesSummary: linkedDevices.map(d => ({
+          id: d.id,
+          name: d.name,
+          macAddress: d.macAddress,
+          manufacturer: d.manufacturer,
+          deviceType: d.deviceType,
+          signalType: d.signalType,
         })),
       };
 
@@ -490,39 +520,97 @@ export async function registerRoutes(
         messages: [
           {
             role: "system",
-            content: `You are SIGINT Hub's AI intelligence analyst. Generate a comprehensive intelligence report about a detected device/signal based on the provided data. Your report should be thorough, technical, and actionable.
+            content: `You are SIGINT Hub's AI multi-INT intelligence analyst. Generate a comprehensive all-source intelligence report about a detected device/signal using the full spectrum of intelligence disciplines. Your report should be thorough, technical, and actionable. Cross-reference all available data to build the most complete picture.
 
 Structure your report with these sections using markdown headers:
-## Device Identification
-Identify the device type, manufacturer details, known product lines, and any identifiers (MAC OUI lookup, UUID analysis).
 
-## Signal Analysis
-Analyze the signal characteristics - frequency bands, protocols, encryption, signal strength patterns, and what they reveal about the device.
+## Device Identification & OUI Analysis
+Identify the device type, manufacturer details, and product line. Perform OUI (Organizationally Unique Identifier) analysis on the MAC address prefix to identify the chipset vendor vs. the product manufacturer. Discuss what the MAC OUI reveals about the hardware supply chain (e.g., "OUI A4:83:E7 is registered to Apple Inc., consistent with iPhone/iPad hardware"). If the OUI prefix suggests a different manufacturer than the device name, note this discrepancy as it may indicate MAC spoofing or whitelabel hardware. Analyze any UUID patterns for device family identification.
 
-## Geospatial Intelligence
-Analyze location data - movement patterns, area of operation, known locations near coordinates, and any patterns in the GPS data.
+## SIGINT Assessment (Signals Intelligence)
+Analyze the signal characteristics through a SIGINT lens:
+- Frequency bands and what they indicate about transmission capabilities
+- Protocol analysis (BLE version, WiFi standard, LoRa modulation, etc.)
+- Encryption posture assessment (AES-CCM, WPA3, open, etc.) and what it reveals about security awareness
+- Signal strength (RSSI) patterns and what they suggest about device proximity and power output
+- Temporal signal patterns - when does this device transmit? Duty cycle analysis
+- Channel hopping behavior and frequency agility
 
-## Threat Assessment
-Evaluate potential security implications - is this a known surveillance device? Tracking device? Could it be used maliciously? What is the risk level (Low/Medium/High/Critical)?
+## GEOINT Assessment (Geospatial Intelligence)
+Analyze all location data through a GEOINT lens:
+- Plot movement patterns and calculate speed/heading if multiple observations exist
+- Determine area of operation (AO) and assess whether positions indicate indoor/outdoor, urban/rural, residential/commercial
+- Identify significant locations near coordinates (airports, government buildings, military installations, borders, critical infrastructure)
+- For telemetry-broadcasting devices (LoRa/Meshtastic/ADS-B), note whether positions are from device telemetry vs. collection sensor proximity
+- Calculate geospatial spread and determine if the device is stationary, mobile, or following a route
 
-## OSINT Findings
-Based on the device identifiers (MAC address, manufacturer, model), provide what is publicly known - product specs, known vulnerabilities, common uses, any CVEs, regulatory filings (FCC ID lookups), and relevant public information.
+## MASINT Assessment (Measurement & Signature Intelligence)
+Analyze the device's measurable signatures:
+- RF emission signature: power output estimation from RSSI at known distances
+- Frequency fingerprint: precise frequency offset from nominal center frequency
+- Protocol timing signatures: beacon interval, transmission duration, modulation characteristics
+- If altitude data available: elevation analysis for airborne vs ground-based classification
+- Environmental signature: what does the frequency/protocol combination reveal about the operating environment
 
-## Behavioral Profile
-Analyze observation patterns - timing patterns, frequency of appearance, movement characteristics, and what this suggests about the device operator.
+## OSINT Cross-Reference (Open Source Intelligence)
+Perform comprehensive OSINT analysis:
+- **MAC/OUI Registry**: Cross-reference the IEEE OUI database for the MAC prefix. Identify the registered organization, registration date, and address
+- **FCC ID Lookup**: Based on the manufacturer and model, identify likely FCC ID filings, certification dates, maximum allowed power output
+- **CVE Database**: Search for known vulnerabilities (CVEs) associated with this device manufacturer, model, firmware, or protocol version. List specific CVE IDs where applicable
+- **Product Intelligence**: Known specifications, firmware versions, default configurations, factory reset behaviors
+- **Manufacturer OSINT**: Company background, country of origin, known government/military contracts, supply chain analysis
+- **Dark Web / Threat Intel**: Known exploit tools targeting this device class (e.g., BLE spoofing tools, WiFi deauth frameworks, SDR replay attacks)
+- **Regulatory Filings**: FCC, CE, or other regulatory certifications that reveal technical capabilities
 
-## Recommendations
-Provide actionable next steps for the analyst - what to monitor, potential countermeasures, and additional data collection suggestions.
+## COMINT Implications (Communications Intelligence)
+If the device is communications-capable:
+- What communications does this device facilitate or relay?
+- Network topology implications (mesh node, gateway, endpoint)
+- Potential for intercepting or monitoring communications through this device
+- Encryption strength assessment for communications in transit
 
-Be specific, technical, and provide real-world context. If the MAC address is available, discuss the OUI (manufacturer prefix). If coordinates are available, describe the general area. Use technical SIGINT terminology appropriately.`
+## Association & Link Analysis
+If this device has associations with other detected devices:
+- Analyze the nature and strength of each link
+- What intelligence discipline (SIGINT/GEOINT/MASINT) established each association?
+- Cross-reference linked device types to build a picture of the operator's device ecosystem
+- Identify potential carrier/device relationships (e.g., phone + wearable + earbuds = same person)
+- Network analysis: is this device a hub, spoke, or isolated node?
+
+## Threat Assessment & Risk Profile
+Evaluate through a counter-intelligence lens:
+- Is this a known surveillance, tracking, or reconnaissance device?
+- Could it be part of a technical surveillance countermeasures (TSCM) threat?
+- Classification: benign consumer device, dual-use, or purpose-built intelligence collection tool?
+- Risk level: **LOW** / **MEDIUM** / **HIGH** / **CRITICAL** with justification
+- Indicators of compromise (IOCs) or suspicious behaviors
+
+## Behavioral Profile & Pattern of Life
+Analyze the temporal and spatial patterns:
+- Activity schedule: when does the device appear and disappear?
+- Dwell time analysis at each location
+- Movement velocity and pattern classification (random walk, linear transit, patrol pattern, static)
+- What does this pattern suggest about the device operator's routine, intent, and sophistication?
+- Anomaly detection: anything unusual compared to typical devices of this class?
+
+## Actionable Recommendations
+Provide specific, prioritized next steps:
+- Immediate actions (flag, track, alert configuration)
+- Additional collection tasking (which sensors/frequencies to monitor)
+- Counter-measures if threat is identified
+- Cross-cueing opportunities with other intelligence sources
+- Recommended association analysis with nearby devices
+- Suggested OSINT queries for deeper investigation
+
+Be specific, technical, and provide real-world context. Use proper intelligence community terminology and tradecraft. Reference specific technical standards (IEEE 802.11, Bluetooth SIG specs, 3GPP, ITU allocations) where relevant. If data is insufficient for a section, state what additional collection would enable that analysis.`
           },
           {
             role: "user",
-            content: `Analyze this device and generate a full intelligence report:\n\n${JSON.stringify(deviceData, null, 2)}`
+            content: `Generate a full multi-INT intelligence report for this device. Cross-reference all available data including associations with other detected devices:\n\n${JSON.stringify(deviceData, null, 2)}`
           }
         ],
         stream: true,
-        max_tokens: 4096,
+        max_tokens: 6000,
       });
 
       for await (const chunk of stream) {

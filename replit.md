@@ -14,7 +14,9 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
   - Settings panel has sensor management section (add/view/delete sensors)
   - Dashboard shows sensor activation buttons (replaces old BLE Scan / Add Device buttons)
 - **Passive Monitoring**: Simulated Wireshark-style passive scanning (no Web Bluetooth pairing dialogs)
-  - `ble-scanner.ts` with 150+ device templates across 8 signal types (BLE, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, Sensor)
+  - `ble-scanner.ts` with 250+ device templates across 8 signal types (BLE, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, Sensor)
+  - **OUI Database**: 130+ IEEE OUI prefix-to-manufacturer mappings for instant MAC-based manufacturer identification on first contact (before full device resolution)
+  - **Broad device categories**: Mobile phones, wearables, audio, medical (hearing aids, insulin pumps, CGMs), vehicle keys, smart home, industrial scanners, cameras, e-readers, IoT cameras, mesh routers, industrial WiFi APs, marine/aviation/amateur radio, RFID (passports, hospital wristbands, library tags), environmental sensors (radiation, air quality, soil moisture)
   - **Progressive discovery**: nodes created immediately with MAC + RSSI, then name/manufacturer/type resolve on subsequent passes (like real scanners)
   - **LoRa/Meshtastic short+long name resolution**: mesh nodes resolve short name (4-char callsign like "HV3N") first, then full long name (e.g., "Heltec V3 Node") on subsequent passes — matching real Meshtastic/Meshcore behavior
   - **LoRa modalities**: Meshtastic, Meshcore, Helium, ChirpStack, LoRa P2P, LoRaWAN — all under `lora` signal type
@@ -77,7 +79,13 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - Counter-intelligence panel with following detection
 - Monitoring & alerts system
 - Seed data with realistic signal intelligence scenarios
-- AI-powered device analysis (OpenAI gpt-4o via Replit AI Integrations)
+- AI-powered multi-INT intelligence analysis (OpenAI gpt-4o via Replit AI Integrations)
+  - Full-spectrum analysis: SIGINT, GEOINT, MASINT, OSINT, COMINT assessments per device
+  - OUI/MAC cross-referencing for chipset/manufacturer identification
+  - OSINT enrichment: CVE database, FCC ID lookups, manufacturer intelligence, known vulnerabilities
+  - Device association cross-referencing: linked devices, operator ecosystem profiling
+  - Behavioral pattern of life analysis and anomaly detection
+  - Threat assessment with risk classification (LOW/MEDIUM/HIGH/CRITICAL)
 - SIGINT Node Report page (/node-report/:id) - comprehensive intelligence dossier per node
 - Manual observation logging dialog with GPS auto-fill
 - Settings panel: sensor management, browser capabilities, system info, data mode, security, data management

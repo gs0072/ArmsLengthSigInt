@@ -309,7 +309,7 @@ export function DeviceAnalysis({ device, observations, onClose }: DeviceAnalysis
                         <Zap className="w-3 h-3" /> Extended Metadata
                       </h4>
                       <pre className="text-[10px] font-mono p-3 rounded-md bg-muted/10 border border-border/50 overflow-x-auto whitespace-pre-wrap" data-testid="text-extended-metadata">
-                        {JSON.stringify(device.metadata as Record<string, unknown>, null, 2)}
+                        {String(JSON.stringify(device.metadata, null, 2))}
                       </pre>
                     </div>
                   )}
