@@ -6,15 +6,15 @@ import { MapView } from "@/components/map-view";
 import { DeviceList } from "@/components/device-list";
 import { DeviceDetail } from "@/components/device-detail";
 import { ScanPulse, GlowLine } from "@/components/scan-animation";
-import { AddDeviceDialog } from "@/components/add-device-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Pause, RefreshCw, Bluetooth, Plus } from "lucide-react";
+import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2 } from "lucide-react";
 import { isWebBluetoothSupported, scanForBLEDevice, getCurrentPosition } from "@/lib/ble-scanner";
-import type { Device, Observation, Alert } from "@shared/schema";
+import { Link } from "wouter";
+import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
@@ -34,6 +34,105 @@ export default function Dashboard() {
     queryKey: ["/api/alerts"],
   });
 
+  const { data: sensors = [] } = useQuery<CollectionSensor[]>({
+    queryKey: ["/api/sensors"],
+  });
+
+  const sensorTypeIcons: Record<string, any> = {
+    bluetooth: Bluetooth, wifi: Wifi, rfid: CircuitBoard, sdr: Antenna,
+    lora: Radio, meshtastic: Radio, adsb: Satellite, sensor: Thermometer, unknown: Radar,
+  };
+
+  const sensorTypeColors: Record<string, string> = {
+    bluetooth: "hsl(217, 91%, 60%)", wifi: "hsl(142, 76%, 48%)", rfid: "hsl(45, 90%, 55%)",
+    sdr: "hsl(280, 65%, 55%)", lora: "hsl(25, 85%, 55%)", meshtastic: "hsl(25, 85%, 55%)",
+    adsb: "hsl(0, 72%, 55%)", sensor: "hsl(320, 70%, 55%)", unknown: "hsl(200, 20%, 50%)",
+  };
+
+  const updateSensorStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      const res = await apiRequest("PATCH", `/api/sensors/${id}`, { status });
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
+  });
+
+  const activateSensor = useCallback(async (sensor: CollectionSensor) => {
+    if (sensor.sensorType === "bluetooth") {
+      if (!isWebBluetoothSupported()) {
+        toast({
+          title: "Bluetooth Not Available",
+          description: "Web Bluetooth is not supported in this browser. Use Chrome or Edge.",
+          variant: "destructive",
+        });
+        return;
+      }
+      updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
+      setBleScanning(true);
+      try {
+        const bleDevice = await scanForBLEDevice();
+        if (!bleDevice) {
+          toast({ title: "Scan Cancelled", description: "No node was selected." });
+          updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
+          setBleScanning(false);
+          return;
+        }
+        const pos = await getCurrentPosition();
+        const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(bleDevice.id)}`, { credentials: "include" });
+        const existing = await existingRes.json();
+        let device: Device;
+        if (existing && existing.id) {
+          device = existing;
+          toast({ title: "Node Found", description: `${bleDevice.name || bleDevice.id} already tracked. Logging new observation.` });
+        } else {
+          const createRes = await apiRequest("POST", "/api/devices", {
+            name: bleDevice.name || `BLE ${bleDevice.id.substring(0, 8)}`,
+            macAddress: bleDevice.id,
+            signalType: "bluetooth",
+            deviceType: "BLE Device",
+            notes: `Discovered by sensor: ${sensor.name}`,
+          });
+          device = await createRes.json();
+          toast({ title: "New Node Discovered", description: `${device.name} detected by ${sensor.name}.` });
+        }
+        const obsBody: Record<string, any> = {
+          deviceId: device.id,
+          signalType: "bluetooth",
+          protocol: "BLE",
+        };
+        if (pos) {
+          obsBody.latitude = pos.lat;
+          obsBody.longitude = pos.lng;
+          if (pos.alt != null) obsBody.altitude = pos.alt;
+        }
+        await apiRequest("POST", "/api/observations", obsBody);
+        updateSensorStatus.mutate({
+          id: sensor.id,
+          status: "idle",
+        });
+        await apiRequest("PATCH", `/api/sensors/${sensor.id}`, {
+          nodesCollected: (sensor.nodesCollected || 0) + 1,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
+        setSelectedDeviceId(device.id);
+      } catch (err: any) {
+        updateSensorStatus.mutate({ id: sensor.id, status: "error" });
+        if (err.name !== "NotFoundError") {
+          toast({ title: "Scan Error", description: err.message, variant: "destructive" });
+        }
+      } finally {
+        setBleScanning(false);
+      }
+    } else {
+      toast({
+        title: "Hardware Required",
+        description: `${sensor.name} requires a native companion app for ${sensor.sensorType} collection. Coming soon.`,
+      });
+    }
+  }, [toast, updateSensorStatus, queryClient]);
+
   const toggleTrack = useMutation({
     mutationFn: async (id: number) => {
       const device = devices.find(d => d.id === id);
@@ -50,71 +149,6 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/devices"] }),
   });
 
-  const bleScan = useCallback(async () => {
-    if (!isWebBluetoothSupported()) {
-      toast({
-        title: "Bluetooth Not Available",
-        description: "Web Bluetooth is not supported in this browser. Use Chrome or Edge on desktop, or Chrome on Android.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setBleScanning(true);
-    try {
-      const bleDevice = await scanForBLEDevice();
-      if (!bleDevice) {
-        toast({ title: "Scan Cancelled", description: "No device was selected." });
-        setBleScanning(false);
-        return;
-      }
-
-      const pos = await getCurrentPosition();
-
-      const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(bleDevice.id)}`, { credentials: "include" });
-      const existing = await existingRes.json();
-
-      let device: Device;
-      if (existing && existing.id) {
-        device = existing;
-        toast({ title: "Device Found", description: `${bleDevice.name || bleDevice.id} already in your collection. Logging new observation.` });
-      } else {
-        const createRes = await apiRequest("POST", "/api/devices", {
-          name: bleDevice.name || `BLE ${bleDevice.id.substring(0, 8)}`,
-          macAddress: bleDevice.id,
-          signalType: "bluetooth",
-          deviceType: "BLE Device",
-          notes: `Discovered via Web Bluetooth scan`,
-        });
-        device = await createRes.json();
-        toast({ title: "New Device Discovered", description: `${device.name} added to your collection.` });
-      }
-
-      const obsBody: Record<string, any> = {
-        deviceId: device.id,
-        signalType: "bluetooth",
-        protocol: "BLE",
-      };
-      if (bleDevice.rssi != null) obsBody.signalStrength = bleDevice.rssi;
-      if (pos) {
-        obsBody.latitude = pos.lat;
-        obsBody.longitude = pos.lng;
-        if (pos.alt != null) obsBody.altitude = pos.alt;
-      }
-      await apiRequest("POST", "/api/observations", obsBody);
-
-      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
-      setSelectedDeviceId(device.id);
-    } catch (err: any) {
-      if (err.name !== "NotFoundError") {
-        toast({ title: "Scan Error", description: err.message, variant: "destructive" });
-      }
-    } finally {
-      setBleScanning(false);
-    }
-  }, [toast, queryClient]);
-
   const selectedDevice = devices.find(d => d.id === selectedDeviceId);
   const isLoading = devicesLoading || obsLoading;
 
@@ -126,21 +160,35 @@ export default function Dashboard() {
             Operations Dashboard
           </h2>
           <Badge variant="outline" className="text-[9px] uppercase">
-            {devices.length} Devices
+            {devices.length} Nodes
+          </Badge>
+          <Badge variant="outline" className="text-[9px] uppercase">
+            {sensors.length} Sensors
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={bleScanning ? "destructive" : "default"}
-            onClick={bleScan}
-            disabled={bleScanning}
-            data-testid="button-ble-scan"
-          >
-            <Bluetooth className="w-3.5 h-3.5 mr-1" />
-            {bleScanning ? "Scanning..." : "BLE Scan"}
-          </Button>
-          <AddDeviceDialog />
+        <div className="flex items-center gap-2 flex-wrap">
+          {sensors.filter(s => s.sensorType === "bluetooth").length > 0 ? (
+            sensors.filter(s => s.sensorType === "bluetooth").map(sensor => (
+              <Button
+                key={sensor.id}
+                size="sm"
+                variant={bleScanning ? "destructive" : "default"}
+                onClick={() => activateSensor(sensor)}
+                disabled={bleScanning}
+                data-testid={`button-activate-sensor-${sensor.id}`}
+              >
+                <Bluetooth className="w-3.5 h-3.5 mr-1" />
+                {bleScanning ? "Scanning..." : sensor.name}
+              </Button>
+            ))
+          ) : (
+            <Link href="/settings">
+              <Button size="sm" variant="outline" data-testid="button-configure-sensors">
+                <Settings className="w-3.5 h-3.5 mr-1" />
+                Configure Sensors
+              </Button>
+            </Link>
+          )}
           <Button
             size="icon"
             variant="outline"
@@ -203,25 +251,43 @@ export default function Dashboard() {
           <Card className="flex flex-col items-center justify-center p-6 text-center overflow-visible gap-4">
             <ScanPulse active={bleScanning} size={60} />
             <div>
-              <p className="text-xs text-muted-foreground">Select a device to view details</p>
+              <p className="text-xs text-muted-foreground">Select a node to view details</p>
               <p className="text-[10px] text-muted-foreground mt-1">
-                {devices.length} device{devices.length !== 1 ? "s" : ""} in collection
+                {devices.length} node{devices.length !== 1 ? "s" : ""} discovered
               </p>
             </div>
-            <div className="flex flex-col gap-2 w-full max-w-[200px]">
-              <Button size="sm" onClick={bleScan} disabled={bleScanning} data-testid="button-ble-scan-panel">
-                <Bluetooth className="w-3.5 h-3.5 mr-1" />
-                Scan Bluetooth
-              </Button>
-              <AddDeviceDialog
-                trigger={
-                  <Button size="sm" variant="outline" data-testid="button-add-device-panel">
-                    <Plus className="w-3.5 h-3.5 mr-1" />
-                    Add Device Manually
+            {sensors.length > 0 ? (
+              <div className="flex flex-col gap-2 w-full max-w-[220px]">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Activate Sensor</p>
+                {sensors.map(sensor => {
+                  const SIcon = sensorTypeIcons[sensor.sensorType] || Radar;
+                  const isBleSensor = sensor.sensorType === "bluetooth";
+                  return (
+                    <Button
+                      key={sensor.id}
+                      size="sm"
+                      variant={isBleSensor ? "default" : "outline"}
+                      onClick={() => activateSensor(sensor)}
+                      disabled={isBleSensor && bleScanning}
+                      data-testid={`button-activate-sensor-panel-${sensor.id}`}
+                    >
+                      <SIcon className="w-3.5 h-3.5 mr-1" />
+                      {isBleSensor && bleScanning ? "Scanning..." : sensor.name}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 w-full max-w-[220px]">
+                <p className="text-[10px] text-muted-foreground">No sensors configured yet</p>
+                <Link href="/settings">
+                  <Button size="sm" variant="outline" className="w-full" data-testid="button-goto-settings-panel">
+                    <Settings className="w-3.5 h-3.5 mr-1" />
+                    Configure Sensors in Settings
                   </Button>
-                }
-              />
-            </div>
+                </Link>
+              </div>
+            )}
           </Card>
         )}
       </div>

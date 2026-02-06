@@ -36,7 +36,7 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold truncate">
-              {device.name || "Unknown Device"}
+              {device.name || "Unknown Node"}
             </h3>
             <SignalBadge type={device.signalType} size="sm" />
           </div>

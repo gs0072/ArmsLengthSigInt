@@ -12,7 +12,7 @@ interface StatsBarProps {
 export function StatsBar({ devices, observations, alerts }: StatsBarProps) {
   const stats = [
     {
-      label: "Total Devices",
+      label: "Total Nodes",
       value: devices.length,
       icon: <Activity className="w-4 h-4" />,
       color: "hsl(185, 100%, 50%)",

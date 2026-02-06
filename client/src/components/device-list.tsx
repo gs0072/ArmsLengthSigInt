@@ -54,7 +54,7 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
           <div className="relative flex-1">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input
-              placeholder="Search devices..."
+              placeholder="Search nodes..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-8 text-xs"
@@ -94,7 +94,7 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
           </Select>
         </div>
         <div className="text-xs text-muted-foreground">
-          {filtered.length} device{filtered.length !== 1 ? "s" : ""} found
+          {filtered.length} node{filtered.length !== 1 ? "s" : ""} found
         </div>
       </CardHeader>
       <CardContent className="flex-1 px-2 pb-2 overflow-hidden">
@@ -107,7 +107,7 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-muted-foreground text-xs">
                 <Search className="w-8 h-8 mb-2 opacity-30" />
-                <p>No devices found</p>
+                <p>No nodes found</p>
                 <p className="text-[10px] mt-1">Adjust your search or filters</p>
               </div>
             ) : (
@@ -128,7 +128,7 @@ export function DeviceList({ devices, observations, selectedDeviceId, onSelectDe
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-medium truncate">
-                            {device.name || "Unknown Device"}
+                            {device.name || "Unknown Node"}
                           </span>
                           {device.isFlagged && (
                             <Flag className="w-3 h-3 text-destructive flex-shrink-0" />

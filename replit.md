@@ -4,7 +4,18 @@
 A comprehensive signal intelligence platform for collecting, analyzing, and triangulating Bluetooth, WiFi, RFID, SDR, LoRa, and sensor data with geospatial mapping, multi-user collaboration, and AI-powered device analysis. Designed for search and rescue, law enforcement, military operations, and open-source intelligence hobbyists.
 
 ## Current State
-- MVP with full CRUD for devices, observations, alerts, and following detection
+- MVP with full CRUD for nodes (detected devices/signals), observations, alerts, and following detection
+- **Collection Sensors architecture**: Users configure hardware sensors in Settings, activate them from Dashboard to auto-discover nodes
+  - `collection_sensors` table with full CRUD API (`/api/sensors`) and Zod validation
+  - Sensor types: bluetooth, wifi, rfid, sdr, lora, meshtastic, adsb, sensor
+  - Connection methods: builtin, bluetooth, usb, serial, network
+  - Sensor statuses: idle, connecting, collecting, error, disconnected
+  - AddSensorDialog component for configuring new sensors
+  - Settings panel has sensor management section (add/view/delete sensors)
+  - Dashboard shows sensor activation buttons (replaces old BLE Scan / Add Device buttons)
+- **Terminology**: UI uses "Nodes" for detected signals/devices, "Sensors" for collection hardware
+  - Internal data model still uses "devices" table for backward compatibility
+  - Sidebar shows "Node List", stats show "Total Nodes", etc.
 - Replit Auth with user profiles and tier system
 - Dark cyberpunk-themed UI with responsive design
 - Interactive world map with device markers via Leaflet
@@ -13,18 +24,17 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - Monitoring & alerts system
 - Seed data with realistic signal intelligence scenarios
 - AI-powered device analysis (OpenAI gpt-4o via Replit AI Integrations)
-- SIGINT Node Report page (/node-report/:id) - comprehensive intelligence dossier per device
-- Real Bluetooth scanning via Web Bluetooth API with GPS auto-tagging
-- Manual device entry dialog (all signal types) with Zod-validated backend
+- SIGINT Node Report page (/node-report/:id) - comprehensive intelligence dossier per node
+- Real Bluetooth scanning via Web Bluetooth API with GPS auto-tagging (triggered via sensor activation)
 - Manual observation logging dialog with GPS auto-fill
-- Settings panel shows honest browser capabilities vs native app requirements
+- Settings panel: sensor management, browser capabilities, data mode, security, data management
 - Clear All Data feature to remove seed data and start fresh
-- Backend validation: createDeviceSchema and createObservationSchema (Zod) on POST routes
+- Backend validation: createDeviceSchema, createObservationSchema, createSensorSchema (Zod) on POST routes
 
 ## Architecture
 - **Frontend**: React + TypeScript, Tailwind CSS, Shadcn UI, Wouter routing, TanStack Query, Leaflet maps, Framer Motion animations
 - **Backend**: Express.js + TypeScript, PostgreSQL (Drizzle ORM), Replit Auth (OpenID Connect)
-- **Database**: PostgreSQL with tables: users, sessions, devices, observations, alerts, device_catalog, user_profiles, activity_log, following_detection
+- **Database**: PostgreSQL with tables: users, sessions, devices, observations, alerts, device_catalog, user_profiles, activity_log, following_detection, collection_sensors
 
 ## Key Design Decisions
 - Cyberpunk/tech-movie dark theme with cyan (#00d4ff) primary color and purple accents
@@ -61,7 +71,8 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - `client/src/components/` - Reusable components (AppSidebar, MapView, DeviceList, DeviceDetail, DeviceAnalysis, StatsBar, etc.)
 - `client/src/lib/signal-utils.ts` - Signal type definitions, utilities, device catalog data
 - `client/src/lib/ble-scanner.ts` - Web Bluetooth API scanning and GPS geolocation
-- `client/src/components/add-device-dialog.tsx` - Manual device entry form dialog
+- `client/src/components/add-sensor-dialog.tsx` - Sensor configuration dialog
+- `client/src/components/add-device-dialog.tsx` - Manual device entry form dialog (legacy, kept for reference)
 - `client/src/components/add-observation-dialog.tsx` - Manual observation logging dialog
 
 ## User Preferences

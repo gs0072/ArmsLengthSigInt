@@ -5,13 +5,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2 } from "lucide-react";
 import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { isWebBluetoothSupported } from "@/lib/ble-scanner";
-import type { UserProfile } from "@shared/schema";
+import { AddSensorDialog } from "./add-sensor-dialog";
+import type { UserProfile, CollectionSensor } from "@shared/schema";
 
 interface SettingsPanelProps {
   dataMode: string;
@@ -65,6 +66,47 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
       toast({ title: "Error", description: "Failed to clear data.", variant: "destructive" });
     },
   });
+
+  const { data: sensors = [], isLoading: sensorsLoading } = useQuery<CollectionSensor[]>({
+    queryKey: ["/api/sensors"],
+  });
+
+  const deleteSensorMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/sensors/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
+      toast({ title: "Sensor Removed", description: "Collection sensor has been removed." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to remove sensor.", variant: "destructive" });
+    },
+  });
+
+  const sensorTypeIcons: Record<string, any> = {
+    bluetooth: Bluetooth,
+    wifi: Wifi,
+    rfid: CircuitBoard,
+    sdr: Antenna,
+    lora: Radio,
+    meshtastic: Radio,
+    adsb: Satellite,
+    sensor: Thermometer,
+    unknown: Radar,
+  };
+
+  const sensorTypeColors: Record<string, string> = {
+    bluetooth: "hsl(217, 91%, 60%)",
+    wifi: "hsl(142, 76%, 48%)",
+    rfid: "hsl(45, 90%, 55%)",
+    sdr: "hsl(280, 65%, 55%)",
+    lora: "hsl(25, 85%, 55%)",
+    meshtastic: "hsl(25, 85%, 55%)",
+    adsb: "hsl(0, 72%, 55%)",
+    sensor: "hsl(320, 70%, 55%)",
+    unknown: "hsl(200, 20%, 50%)",
+  };
 
   const storagePercent = storageLimit > 0 ? (storageUsed / storageLimit) * 100 : 0;
   const formatBytes = (b: number) => {
@@ -180,15 +222,97 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Cpu className="w-3.5 h-3.5 text-primary" />
-              <h4 className="text-xs font-medium">Collection Capabilities</h4>
+              <h4 className="text-xs font-medium">Collection Sensors</h4>
+            </div>
+            <AddSensorDialog
+              trigger={
+                <Button size="sm" variant="outline" data-testid="button-add-sensor-settings">
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add
+                </Button>
+              }
+            />
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Configure your collection hardware here. Activate sensors from the Dashboard to start discovering nodes.
+          </p>
+          {sensorsLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : sensors.length === 0 ? (
+            <div className="text-center py-4 space-y-2">
+              <p className="text-[10px] text-muted-foreground">No sensors configured yet.</p>
+              <p className="text-[10px] text-muted-foreground/70">Add a sensor to start collecting signal intelligence.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sensors.map((sensor) => {
+                const SensorIcon = sensorTypeIcons[sensor.sensorType] || Radar;
+                const sensorColor = sensorTypeColors[sensor.sensorType] || "hsl(200, 20%, 50%)";
+                return (
+                  <div
+                    key={sensor.id}
+                    className="flex items-center justify-between gap-3 p-2 rounded-md border border-border/50 bg-muted/10"
+                    data-testid={`sensor-item-${sensor.id}`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div
+                        className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: sensorColor, opacity: 0.15 }}
+                      >
+                        <SensorIcon className="w-3.5 h-3.5" style={{ color: sensorColor }} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] font-medium truncate">{sensor.name}</span>
+                          <Badge variant="outline" className="text-[8px] uppercase">
+                            {sensor.connectionMethod}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className="text-[8px] uppercase"
+                            style={{
+                              color: sensor.status === "collecting" ? "hsl(185, 100%, 50%)" : sensor.status === "error" ? "hsl(0, 72%, 55%)" : undefined,
+                              borderColor: sensor.status === "collecting" ? "hsl(185, 100%, 50%)" : sensor.status === "error" ? "hsl(0, 72%, 55%)" : undefined,
+                            }}
+                          >
+                            {sensor.status || "idle"}
+                          </Badge>
+                        </div>
+                        <p className="text-[9px] text-muted-foreground truncate">
+                          {sensor.sensorType} {sensor.nodesCollected ? `| ${sensor.nodesCollected} nodes collected` : ""} {sensor.notes ? `| ${sensor.notes}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => deleteSensorMutation.mutate(sensor.id)}
+                      disabled={deleteSensorMutation.isPending}
+                      data-testid={`button-delete-sensor-${sensor.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <GlowLine />
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Radar className="w-3.5 h-3.5 text-muted-foreground" />
+              <h4 className="text-xs font-medium">Browser Capabilities</h4>
             </div>
             <Badge variant="outline" className="text-[8px] uppercase tracking-wider">
               {capabilities.filter(c => c.available).length} / {capabilities.length} Available
             </Badge>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            Browser-based collection supports Bluetooth and GPS. Other hardware requires native companion apps (planned).
-          </p>
           <div className="space-y-2">
             {capabilities.map((cap) => {
               const IconComp = cap.icon;
@@ -225,9 +349,6 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
               );
             })}
           </div>
-          <p className="text-[10px] text-muted-foreground/70 italic">
-            You can always add devices and log observations manually, regardless of hardware availability.
-          </p>
         </div>
 
         <GlowLine />

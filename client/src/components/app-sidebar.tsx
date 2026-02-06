@@ -31,7 +31,7 @@ interface AppSidebarProps {
 const navItems = [
   { title: "Dashboard", path: "/", icon: LayoutDashboard },
   { title: "World Map", path: "/map", icon: Map },
-  { title: "Device List", path: "/devices", icon: List },
+  { title: "Node List", path: "/devices", icon: List },
   { title: "Search & Query", path: "/search", icon: Search },
   { title: "Monitoring", path: "/monitoring", icon: Bell },
   { title: "Counter Intel", path: "/counter-intel", icon: Shield },
@@ -103,7 +103,7 @@ export function AppSidebar({ user, alertCount, deviceCount, profile }: AppSideba
           <SidebarGroupContent>
             <div className="px-3 py-2 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Devices</span>
+                <span className="text-[10px] text-muted-foreground">Nodes</span>
                 <span className="text-[10px] font-mono">{deviceCount}</span>
               </div>
               <div className="flex items-center justify-between">
