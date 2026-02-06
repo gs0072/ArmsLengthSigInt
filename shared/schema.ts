@@ -177,6 +177,7 @@ export const associationTypeEnum = pgEnum("association_type", [
   "frequency_sharing",
   "temporal_correlation",
   "manual",
+  "geoint_triangulation",
 ]);
 
 export const deviceAssociations = pgTable("device_associations", {

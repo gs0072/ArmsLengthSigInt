@@ -21,14 +21,15 @@ import { timeAgo, formatCoordinates, formatFrequency, getSignalLabel, getSignalC
 import { useToast } from "@/hooks/use-toast";
 
 const ASSOC_TYPE_LABELS: Record<string, string> = {
-  co_movement: "Co-Movement",
-  signal_correlation: "Signal Correlation",
+  co_movement: "GEOINT Co-Movement",
+  signal_correlation: "SIGINT Signal Correlation",
   command_control: "Command & Control",
   network_peer: "Network Peer",
-  proximity_pattern: "Proximity Pattern",
-  frequency_sharing: "Frequency Sharing",
-  temporal_correlation: "Temporal Correlation",
-  manual: "Manual Link",
+  proximity_pattern: "GEOINT Proximity Pattern",
+  frequency_sharing: "MASINT Signature Correlation",
+  temporal_correlation: "SIGINT Temporal Pattern",
+  geoint_triangulation: "GEOINT Triangulation Fix",
+  manual: "Manual Intelligence Link",
 };
 
 const ASSOC_TYPE_COLORS: Record<string, string> = {
@@ -39,7 +40,27 @@ const ASSOC_TYPE_COLORS: Record<string, string> = {
   proximity_pattern: "hsl(45, 90%, 55%)",
   frequency_sharing: "hsl(185, 100%, 50%)",
   temporal_correlation: "hsl(217, 91%, 60%)",
+  geoint_triangulation: "hsl(35, 95%, 52%)",
   manual: "hsl(200, 20%, 50%)",
+};
+
+const INTEL_DISCIPLINE_LABELS: Record<string, string> = {
+  SIGINT: "Signals Intelligence",
+  GEOINT: "Geospatial Intelligence",
+  MASINT: "Measurement & Signature Intelligence",
+  MULTI_INT: "Multi-Discipline Intelligence",
+};
+
+const ASSOC_DISCIPLINE: Record<string, string> = {
+  co_movement: "GEOINT",
+  signal_correlation: "SIGINT",
+  command_control: "SIGINT",
+  network_peer: "SIGINT",
+  proximity_pattern: "GEOINT",
+  frequency_sharing: "MASINT",
+  temporal_correlation: "SIGINT",
+  geoint_triangulation: "GEOINT",
+  manual: "MULTI_INT",
 };
 
 const CONFIDENCE_LEVEL_LABELS: Record<string, string> = {
@@ -313,7 +334,7 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
                     <div className="text-center py-6 space-y-2">
                       <Link2 className="w-8 h-8 mx-auto text-muted-foreground/30" />
                       <p className="text-xs text-muted-foreground">No associations detected</p>
-                      <p className="text-[10px] text-muted-foreground/60">Run analysis to detect statistically significant SIGINT patterns across multiple collection sites</p>
+                      <p className="text-[10px] text-muted-foreground/60">Run analysis to detect Multi-INT patterns: GEOINT co-movement, SIGINT signal correlation, MASINT signature matching, and triangulated location fixes</p>
                     </div>
                   ) : (
                     associations.map(assoc => {
@@ -342,6 +363,9 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-[7px] font-mono">
+                              {ASSOC_DISCIPLINE[assoc.associationType] || "INT"}
+                            </Badge>
                             <Badge variant="secondary" className="text-[8px]" style={{ backgroundColor: `color-mix(in srgb, ${typeColor} 15%, transparent)`, color: typeColor }}>
                               {ASSOC_TYPE_LABELS[assoc.associationType] || assoc.associationType}
                             </Badge>
@@ -372,7 +396,7 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-sm">
                   <Target className="w-4 h-4 text-primary" />
-                  SIGINT Association Intelligence
+                  Multi-INT Association Intelligence
                 </DialogTitle>
               </DialogHeader>
               <AssociationDetailContent
@@ -474,6 +498,9 @@ function AssociationDetailContent({
   const pValue = (evidence?.pValue as number) || 1;
   const obs = (evidence?.observations as Record<string, unknown>) || {};
 
+  const discipline = (evidence?.discipline as string) || ASSOC_DISCIPLINE[association.associationType] || "MULTI_INT";
+  const disciplineLabel = INTEL_DISCIPLINE_LABELS[discipline] || discipline;
+
   const levelColor = getConfidenceLevelColor(confidenceLevel);
   const probColor = getProbabilityColor(posterior);
   const levelLabel = CONFIDENCE_LEVEL_LABELS[confidenceLevel] || confidenceLevel;
@@ -488,6 +515,13 @@ function AssociationDetailContent({
           typeColor={typeColor}
           associationType={association.associationType}
         />
+
+        <div className="flex items-center justify-center gap-2" data-testid="intel-discipline-badge">
+          <Badge variant="outline" className="text-[9px] font-mono">
+            {discipline}
+          </Badge>
+          <span className="text-[10px] text-muted-foreground">{disciplineLabel}</span>
+        </div>
 
         <div className="grid grid-cols-3 gap-2">
           <div className="p-2 rounded-md bg-muted/20 text-center">

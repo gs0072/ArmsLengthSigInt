@@ -21,14 +21,20 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
   - Dashboard `persistNode` creates nodes with partial data, then PATCHes when fields resolve
   - Live signal feed shows "resolving" indicator for unresolved nodes
   - Each discovered node is persisted to DB with GPS auto-tagging
-- **Device Associations (SIGINT Intelligence Links)**:
-  - `device_associations` table tracking co-movement, signal correlation, C2, network peer, proximity, frequency, temporal patterns
+- **Device Associations (Multi-INT Intelligence Links)**:
+  - `device_associations` table with intelligence discipline-aligned association types
+  - **No type-based associations**: links are NOT made based on device/node type — only movement, triangulation, signal behavior, and temporal patterns
+  - Filtering by type, frequency, etc. is allowed in UI but does not drive association creation
   - Association analyzer with **static collection bias filtering** — rejects false associations from single-location scanning
   - Requires geographic diversity (2+ unique locations per device) for spatial associations
-  - Five SIGINT algorithms: spatiotemporal distance ratio test, Pearson RSSI correlation with Fisher Z-transform, multi-site proximity likelihood ratio, RF spectrum co-channel analysis, temporal activation synchronicity test
+  - **Intelligence Discipline Framework**:
+    - **GEOINT** (Geospatial Intelligence): Co-movement analysis, triangulated location fixes via multilateration
+    - **SIGINT** (Signals Intelligence): RSSI signal correlation with Fisher Z-transform, temporal activation synchronicity
+    - **MASINT** (Measurement & Signature Intelligence): RF emission signature correlation, frequency fingerprinting
+  - **GEOINT Triangulation**: Multilateration from multiple collection sensor positions using RSSI-derived distance estimates (log-distance path loss model), comparing triangulated fix convergence across time windows
   - **Proper statistical output**: likelihood ratios, Bayesian posterior probability, confidence levels (almost_certain/highly_likely/likely/possible/unlikely), probability scales, p-values, hypothesis testing (H0/H1)
   - Full CRUD API (`/api/associations`) plus automated analysis endpoint (`/api/associations/analyze`)
-  - DeviceDetail Links tab: each association shows linked node name, confidence level label, LR value; clicking opens detailed popup with mini link diagram, statistical method, hypothesis test, probability bar, observation data
+  - DeviceDetail Links tab: each association shows intelligence discipline badge (GEOINT/SIGINT/MASINT), linked node name, confidence level, LR value; clicking opens detailed popup with discipline label, mini link diagram, statistical method, hypothesis test, probability bar, observation data
 - **Link Analysis Page** (/link-analysis) - Palantir-style force-directed graph visualization
   - Canvas-based interactive graph with physics simulation (repulsion + spring forces)
   - Drag nodes to rearrange, scroll to zoom, pan background

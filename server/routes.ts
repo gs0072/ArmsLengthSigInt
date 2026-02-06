@@ -793,7 +793,7 @@ Be specific, technical, and provide real-world context. If the MAC address is av
       const schema = z.object({
         deviceId1: z.number().int(),
         deviceId2: z.number().int(),
-        associationType: z.enum(["co_movement", "signal_correlation", "command_control", "network_peer", "proximity_pattern", "frequency_sharing", "temporal_correlation", "manual"]),
+        associationType: z.enum(["co_movement", "signal_correlation", "command_control", "network_peer", "proximity_pattern", "frequency_sharing", "temporal_correlation", "manual", "geoint_triangulation"]),
         confidence: z.number().min(0).max(100).default(50),
         reasoning: z.string().optional(),
       });

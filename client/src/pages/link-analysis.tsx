@@ -17,13 +17,14 @@ function hslToAlpha(hslColor: string, alpha: number): string {
 }
 
 const ASSOC_TYPE_LABELS: Record<string, string> = {
-  co_movement: "Co-Movement",
-  signal_correlation: "Signal Correlation",
+  co_movement: "GEOINT Co-Move",
+  signal_correlation: "SIGINT Corr",
   command_control: "C2",
-  network_peer: "Network Peer",
-  proximity_pattern: "Proximity",
-  frequency_sharing: "Freq Share",
-  temporal_correlation: "Temporal",
+  network_peer: "Net Peer",
+  proximity_pattern: "GEOINT Prox",
+  frequency_sharing: "MASINT Sig",
+  temporal_correlation: "SIGINT Temporal",
+  geoint_triangulation: "GEOINT Tri-Fix",
   manual: "Manual",
 };
 
@@ -35,7 +36,20 @@ const ASSOC_TYPE_COLORS: Record<string, string> = {
   proximity_pattern: "#e8c830",
   frequency_sharing: "#00d4ff",
   temporal_correlation: "#4488ee",
+  geoint_triangulation: "#e8a020",
   manual: "#778899",
+};
+
+const ASSOC_DISCIPLINE: Record<string, string> = {
+  co_movement: "GEOINT",
+  signal_correlation: "SIGINT",
+  command_control: "SIGINT",
+  network_peer: "SIGINT",
+  proximity_pattern: "GEOINT",
+  frequency_sharing: "MASINT",
+  temporal_correlation: "SIGINT",
+  geoint_triangulation: "GEOINT",
+  manual: "MULTI-INT",
 };
 
 interface GraphNode {
@@ -541,6 +555,9 @@ export default function LinkAnalysisPage() {
                           </Badge>
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          <Badge variant="outline" className="text-[7px] font-mono">
+                            {ASSOC_DISCIPLINE[assoc.associationType] || "INT"}
+                          </Badge>
                           <Badge variant="secondary" className="text-[7px]" style={{ backgroundColor: `color-mix(in srgb, ${typeColor} 15%, transparent)`, color: typeColor }}>
                             {ASSOC_TYPE_LABELS[assoc.associationType]}
                           </Badge>

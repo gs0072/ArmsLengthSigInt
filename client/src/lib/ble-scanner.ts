@@ -10,6 +10,10 @@ export interface DiscoveredNode {
   channel: number | null;
   encryption: string;
   resolved: boolean;
+  broadcastLat?: number | null;
+  broadcastLng?: number | null;
+  broadcastAlt?: number | null;
+  hasTelemetry?: boolean;
 }
 
 export interface ScanSession {
@@ -30,6 +34,11 @@ interface DeviceTemplate {
   channel: number | null;
   encryption: string;
   resolveDelay: number;
+  broadcastsTelemetry?: boolean;
+  telemetryBaseLat?: number;
+  telemetryBaseLng?: number;
+  telemetryBaseAlt?: number | null;
+  telemetryDriftRadius?: number;
 }
 
 function genMac(): string {
@@ -158,13 +167,23 @@ const SDR_DEVICE_POOL: DeviceTemplate[] = [
 
 const LORA_DEVICE_POOL: DeviceTemplate[] = [
   { name: "Dragino LHT65N", id: "LORA:A84041F831", signalType: "lora", deviceType: "Temp/Humidity Sensor", manufacturer: "Dragino", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2 },
-  { name: "RAK WisBlock Tracker", id: "LORA:AC1F09FFFE", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "RAKwireless", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2 },
-  { name: "Kerlink iFemtoCell", id: "LORA:7276FF0001", signalType: "lora", deviceType: "Gateway", manufacturer: "Kerlink", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1 },
-  { name: "Tektelic Kona Micro", id: "LORA:647FDA0003", signalType: "lora", deviceType: "Gateway", manufacturer: "Tektelic", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1 },
-  { name: "Seeed SenseCAP S2120", id: "LORA:2CF7F12100", signalType: "lora", deviceType: "Weather Station", manufacturer: "Seeed", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3 },
+  { name: "RAK WisBlock Tracker", id: "LORA:AC1F09FFFE", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "RAKwireless", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.749, telemetryBaseLng: -84.388, telemetryBaseAlt: 320, telemetryDriftRadius: 0.008 },
+  { name: "Kerlink iFemtoCell", id: "LORA:7276FF0001", signalType: "lora", deviceType: "Gateway", manufacturer: "Kerlink", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.753, telemetryBaseLng: -84.386, telemetryBaseAlt: 305, telemetryDriftRadius: 0.0001 },
+  { name: "Tektelic Kona Micro", id: "LORA:647FDA0003", signalType: "lora", deviceType: "Gateway", manufacturer: "Tektelic", protocol: "LoRaWAN GW", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.755, telemetryBaseLng: -84.390, telemetryBaseAlt: 312, telemetryDriftRadius: 0.0001 },
+  { name: "Seeed SenseCAP S2120", id: "LORA:2CF7F12100", signalType: "lora", deviceType: "Weather Station", manufacturer: "Seeed", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.748, telemetryBaseLng: -84.391, telemetryBaseAlt: 298, telemetryDriftRadius: 0.0002 },
   { name: "Browan TBMS100", id: "LORA:00137A1000", signalType: "lora", deviceType: "Motion Sensor", manufacturer: "Browan", protocol: "LoRaWAN 1.0.3", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3 },
   { name: "Milesight EM300-TH", id: "LORA:24E124136B", signalType: "lora", deviceType: "Temp/Humidity Sensor", manufacturer: "Milesight", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2 },
   { name: "Elsys ERS CO2", id: "LORA:A81758FFFE", signalType: "lora", deviceType: "Air Quality Sensor", manufacturer: "Elsys", protocol: "LoRaWAN 1.0.3", frequency: 868000000, channel: null, encryption: "AES-128", resolveDelay: 3 },
+  { name: "Meshcore Relay Alpha", id: "LORA:MC:!d4e5f6a7", signalType: "lora", deviceType: "Mesh Relay", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.760, telemetryBaseLng: -84.385, telemetryBaseAlt: 340, telemetryDriftRadius: 0.005 },
+  { name: "Meshcore Tracker T1", id: "LORA:MC:!b8c9d0e1", signalType: "lora", deviceType: "GPS Tracker", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.745, telemetryBaseLng: -84.395, telemetryBaseAlt: 310, telemetryDriftRadius: 0.012 },
+  { name: "Meshcore Base Station", id: "LORA:MC:!f2a3b4c5", signalType: "lora", deviceType: "Base Station", manufacturer: "Meshcore", protocol: "Meshcore 1.2", frequency: 906000000, channel: null, encryption: "AES-256", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.752, telemetryBaseLng: -84.388, telemetryBaseAlt: 318, telemetryDriftRadius: 0.0001 },
+  { name: "Helium Hotspot", id: "LORA:HNT:112ABC34", signalType: "lora", deviceType: "Hotspot/Gateway", manufacturer: "Bobcat", protocol: "LoRaWAN HIP", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.758, telemetryBaseLng: -84.382, telemetryBaseAlt: 325, telemetryDriftRadius: 0.0001 },
+  { name: "Helium Mapper", id: "LORA:HNT:MAPPER001", signalType: "lora", deviceType: "Coverage Mapper", manufacturer: "Helium", protocol: "LoRaWAN HIP", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.741, telemetryBaseLng: -84.400, telemetryBaseAlt: 290, telemetryDriftRadius: 0.015 },
+  { name: "LoRa P2P Relay Node", id: "LORA:P2P:RELAY001", signalType: "lora", deviceType: "P2P Relay", manufacturer: "Custom", protocol: "LoRa P2P", frequency: 915000000, channel: null, encryption: "None", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.756, telemetryBaseLng: -84.379, telemetryBaseAlt: 335, telemetryDriftRadius: 0.0003 },
+  { name: "LoRa P2P Sensor Node", id: "LORA:P2P:SENSOR01", signalType: "lora", deviceType: "Remote Sensor", manufacturer: "Custom", protocol: "LoRa P2P", frequency: 868000000, channel: null, encryption: "None", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.743, telemetryBaseLng: -84.393, telemetryBaseAlt: 305, telemetryDriftRadius: 0.0005 },
+  { name: "ChirpStack Gateway", id: "LORA:CS:GW00A1B2", signalType: "lora", deviceType: "Network Server GW", manufacturer: "ChirpStack", protocol: "LoRaWAN NS", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 1, broadcastsTelemetry: true, telemetryBaseLat: 33.750, telemetryBaseLng: -84.387, telemetryBaseAlt: 310, telemetryDriftRadius: 0.0001 },
+  { name: "Cattle Tracker LoRa", id: "LORA:AG:CATTLE01", signalType: "lora", deviceType: "Livestock Tracker", manufacturer: "Digital Matter", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 3, broadcastsTelemetry: true, telemetryBaseLat: 33.735, telemetryBaseLng: -84.410, telemetryBaseAlt: 280, telemetryDriftRadius: 0.02 },
+  { name: "Oyster3 Asset Tracker", id: "LORA:DM:OYSTER03", signalType: "lora", deviceType: "Asset Tracker", manufacturer: "Digital Matter", protocol: "LoRaWAN 1.0.4", frequency: 915000000, channel: null, encryption: "AES-128", resolveDelay: 2, broadcastsTelemetry: true, telemetryBaseLat: 33.762, telemetryBaseLng: -84.375, telemetryBaseAlt: 330, telemetryDriftRadius: 0.01 },
 ];
 
 const MESHTASTIC_DEVICE_POOL: DeviceTemplate[] = [
