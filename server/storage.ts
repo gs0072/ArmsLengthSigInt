@@ -1,5 +1,5 @@
 import {
-  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection,
+  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors,
   type User, type UpsertUser,
   type Device, type InsertDevice,
   type Observation, type InsertObservation,
@@ -8,6 +8,7 @@ import {
   type UserProfile, type InsertUserProfile,
   type ActivityLogEntry,
   type FollowingDetectionEntry,
+  type CollectionSensor, type InsertCollectionSensor,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
@@ -44,6 +45,12 @@ export interface IStorage {
   getFollowingDetection(userId: string): Promise<FollowingDetectionEntry[]>;
   getDeviceByMac(userId: string, macAddress: string): Promise<Device | undefined>;
   clearUserData(userId: string): Promise<void>;
+
+  getSensors(userId: string): Promise<CollectionSensor[]>;
+  getSensor(id: number): Promise<CollectionSensor | undefined>;
+  createSensor(sensor: InsertCollectionSensor): Promise<CollectionSensor>;
+  updateSensor(id: number, updates: Partial<InsertCollectionSensor>): Promise<CollectionSensor | undefined>;
+  deleteSensor(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -187,6 +194,29 @@ export class DatabaseStorage implements IStorage {
     await db.delete(followingDetection).where(eq(followingDetection.userId, userId));
     await db.delete(devices).where(eq(devices.userId, userId));
     await db.delete(activityLog).where(eq(activityLog.userId, userId));
+  }
+
+  async getSensors(userId: string): Promise<CollectionSensor[]> {
+    return db.select().from(collectionSensors).where(eq(collectionSensors.userId, userId)).orderBy(desc(collectionSensors.createdAt));
+  }
+
+  async getSensor(id: number): Promise<CollectionSensor | undefined> {
+    const [sensor] = await db.select().from(collectionSensors).where(eq(collectionSensors.id, id));
+    return sensor || undefined;
+  }
+
+  async createSensor(sensor: InsertCollectionSensor): Promise<CollectionSensor> {
+    const [created] = await db.insert(collectionSensors).values(sensor).returning();
+    return created;
+  }
+
+  async updateSensor(id: number, updates: Partial<InsertCollectionSensor>): Promise<CollectionSensor | undefined> {
+    const [updated] = await db.update(collectionSensors).set(updates).where(eq(collectionSensors.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async deleteSensor(id: number): Promise<void> {
+    await db.delete(collectionSensors).where(eq(collectionSensors.id, id));
   }
 }
 

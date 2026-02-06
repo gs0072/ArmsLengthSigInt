@@ -39,6 +39,22 @@ export const userTierEnum = pgEnum("user_tier", [
   "admin"
 ]);
 
+export const sensorConnectionEnum = pgEnum("sensor_connection", [
+  "builtin",
+  "bluetooth",
+  "usb",
+  "serial",
+  "network"
+]);
+
+export const sensorStatusEnum = pgEnum("sensor_status", [
+  "idle",
+  "connecting",
+  "collecting",
+  "error",
+  "disconnected"
+]);
+
 export const devices = pgTable("devices", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   userId: varchar("user_id").notNull(),
@@ -137,6 +153,20 @@ export const followingDetection = pgTable("following_detection", {
   locationHistory: jsonb("location_history"),
 });
 
+export const collectionSensors = pgTable("collection_sensors", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  name: text("name").notNull(),
+  sensorType: signalTypeEnum("sensor_type").notNull(),
+  connectionMethod: sensorConnectionEnum("connection_method").notNull().default("builtin"),
+  status: sensorStatusEnum("status").notNull().default("idle"),
+  config: jsonb("config"),
+  notes: text("notes"),
+  lastActiveAt: timestamp("last_active_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  nodesCollected: integer("nodes_collected").default(0),
+});
+
 export const devicesRelations = relations(devices, ({ many }) => ({
   observations: many(observations),
 }));
@@ -155,6 +185,7 @@ export const insertDeviceCatalogSchema = createInsertSchema(deviceCatalog).omit(
 export const insertUserProfileSchema = createInsertSchema(userProfiles).omit({ id: true });
 export const insertActivityLogSchema = createInsertSchema(activityLog).omit({ id: true, timestamp: true });
 export const insertFollowingDetectionSchema = createInsertSchema(followingDetection).omit({ id: true, firstEncounter: true, lastEncounter: true });
+export const insertCollectionSensorSchema = createInsertSchema(collectionSensors).omit({ id: true, createdAt: true, lastActiveAt: true });
 
 export type InsertDevice = z.infer<typeof insertDeviceSchema>;
 export type Device = typeof devices.$inferSelect;
@@ -168,3 +199,5 @@ export type UserProfile = typeof userProfiles.$inferSelect;
 export type InsertUserProfile = z.infer<typeof insertUserProfileSchema>;
 export type ActivityLogEntry = typeof activityLog.$inferSelect;
 export type FollowingDetectionEntry = typeof followingDetection.$inferSelect;
+export type CollectionSensor = typeof collectionSensors.$inferSelect;
+export type InsertCollectionSensor = z.infer<typeof insertCollectionSensorSchema>;
