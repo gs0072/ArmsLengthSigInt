@@ -61,6 +61,7 @@ export interface IStorage {
   createAssociation(assoc: InsertDeviceAssociation): Promise<DeviceAssociation>;
   updateAssociation(id: number, updates: Partial<InsertDeviceAssociation>): Promise<DeviceAssociation | undefined>;
   deleteAssociation(id: number): Promise<void>;
+  deleteAllAssociations(userId: string): Promise<number>;
 
   getTrustedUsers(userId: string): Promise<TrustedUser[]>;
   createTrustedUser(tu: InsertTrustedUser): Promise<TrustedUser>;
@@ -265,6 +266,15 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAssociation(id: number): Promise<void> {
     await db.delete(deviceAssociations).where(eq(deviceAssociations.id, id));
+  }
+
+  async deleteAllAssociations(userId: string): Promise<number> {
+    const existing = await this.getAssociations(userId);
+    const count = existing.length;
+    if (count > 0) {
+      await db.delete(deviceAssociations).where(eq(deviceAssociations.userId, userId));
+    }
+    return count;
   }
 
   async getTrustedUsers(userId: string): Promise<TrustedUser[]> {

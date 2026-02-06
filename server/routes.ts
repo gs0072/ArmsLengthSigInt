@@ -928,6 +928,17 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     }
   });
 
+  app.delete("/api/associations/all", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const count = await storage.deleteAllAssociations(userId);
+      await storage.logActivity(userId, "delete_all_associations", `Cleared ${count} associations`);
+      res.json({ success: true, deleted: count });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to clear associations" });
+    }
+  });
+
   app.delete("/api/associations/:id", isAuthenticated, async (req: any, res) => {
     try {
       await storage.deleteAssociation(parseInt(req.params.id));

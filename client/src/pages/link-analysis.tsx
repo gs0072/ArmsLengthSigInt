@@ -5,10 +5,11 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Scan, ZoomIn, ZoomOut, Maximize2, RotateCcw, Link2, Radio } from "lucide-react";
+import { Scan, ZoomIn, ZoomOut, RotateCcw, Link2, Radio, ExternalLink, Trash2, Square, Loader2 } from "lucide-react";
 import type { Device, DeviceAssociation, Observation } from "@shared/schema";
 import { getSignalColor } from "@/lib/signal-utils";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 
 function hslToAlpha(hslColor: string, alpha: number): string {
   const match = hslColor.match(/hsl\(([^)]+)\)/);
@@ -89,23 +90,64 @@ export default function LinkAnalysisPage() {
   const lastMouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const hoveredNodeRef = useRef<GraphNode | null>(null);
   const selectedNodeRef = useRef<GraphNode | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [selectedNode, setSelectedNode] = useState<Device | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<DeviceAssociation | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
 
   const { data: devices = [] } = useQuery<Device[]>({ queryKey: ["/api/devices"] });
   const { data: associations = [] } = useQuery<DeviceAssociation[]>({ queryKey: ["/api/associations"] });
   const { data: observations = [] } = useQuery<Observation[]>({ queryKey: ["/api/observations"] });
 
   const analyzeMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/associations/analyze"),
+    mutationFn: async () => {
+      setIsAnalyzing(true);
+      abortControllerRef.current = new AbortController();
+      const res = await fetch("/api/associations/analyze", {
+        method: "POST",
+        credentials: "include",
+        signal: abortControllerRef.current.signal,
+      });
+      if (!res.ok) throw new Error("Analysis failed");
+      return res.json();
+    },
     onSuccess: (data: any) => {
+      setIsAnalyzing(false);
+      abortControllerRef.current = null;
       queryClient.invalidateQueries({ queryKey: ["/api/associations"] });
       toast({ title: "Analysis Complete", description: `Found ${data.newAssociations} new associations across ${data.analyzed} nodes.` });
     },
+    onError: (err: any) => {
+      setIsAnalyzing(false);
+      abortControllerRef.current = null;
+      if (err.name === "AbortError") {
+        toast({ title: "Analysis Stopped", description: "The analysis was cancelled." });
+      }
+    },
   });
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("DELETE", "/api/associations/all");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/associations"] });
+      setSelectedNode(null);
+      selectedNodeRef.current = null;
+      toast({ title: "Associations Cleared", description: `Removed ${data.deleted} associations.` });
+    },
+  });
+
+  const stopAnalysis = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
 
   const initGraph = useCallback(() => {
     const canvas = canvasRef.current;
@@ -411,11 +453,20 @@ export default function LinkAnalysisPage() {
       zoomRef.current = Math.max(0.2, Math.min(5, zoomRef.current * factor));
     };
 
+    const onDblClick = (e: MouseEvent) => {
+      const pos = getMousePos(e);
+      const node = findNode(pos.x, pos.y);
+      if (node) {
+        setLocation(`/node-report/${node.device.id}`);
+      }
+    };
+
     canvas.addEventListener("mousedown", onMouseDown);
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("mouseleave", onMouseUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("dblclick", onDblClick);
 
     return () => {
       canvas.removeEventListener("mousedown", onMouseDown);
@@ -423,8 +474,9 @@ export default function LinkAnalysisPage() {
       canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("mouseleave", onMouseUp);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("dblclick", onDblClick);
     };
-  }, []);
+  }, [setLocation]);
 
   const resetView = () => {
     panRef.current = { x: 0, y: 0 };
@@ -450,15 +502,41 @@ export default function LinkAnalysisPage() {
             </p>
           </div>
           <div className="flex items-center gap-1">
+            {isAnalyzing ? (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={stopAnalysis}
+                data-testid="button-stop-analysis"
+              >
+                <Square className="w-3.5 h-3.5 mr-1" />
+                Stop
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => analyzeMutation.mutate()}
+                disabled={analyzeMutation.isPending}
+                data-testid="button-analyze-all"
+              >
+                {analyzeMutation.isPending ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Scan className="w-3.5 h-3.5 mr-1" />
+                )}
+                Run Analysis
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
-              onClick={() => analyzeMutation.mutate()}
-              disabled={analyzeMutation.isPending}
-              data-testid="button-analyze-all"
+              onClick={() => resetMutation.mutate()}
+              disabled={resetMutation.isPending || associations.length === 0}
+              data-testid="button-reset-associations"
             >
-              <Scan className="w-3.5 h-3.5 mr-1" />
-              {analyzeMutation.isPending ? "Analyzing..." : "Run Analysis"}
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              Reset
             </Button>
             <Button size="icon" variant="ghost" onClick={zoomIn} data-testid="button-zoom-in">
               <ZoomIn className="w-4 h-4" />
@@ -475,6 +553,13 @@ export default function LinkAnalysisPage() {
         <div ref={containerRef} className="flex-1 relative bg-background">
           <canvas ref={canvasRef} className="w-full h-full" data-testid="canvas-link-graph" />
 
+          {isAnalyzing && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-background/90 backdrop-blur-sm rounded-md border border-border/30">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+              <span className="text-xs text-muted-foreground">Analyzing device associations...</span>
+            </div>
+          )}
+
           <div className="absolute bottom-3 left-3 p-2 bg-background/80 backdrop-blur-sm rounded-md border border-border/30">
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Legend</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
@@ -485,6 +570,7 @@ export default function LinkAnalysisPage() {
                 </div>
               ))}
             </div>
+            <p className="text-[7px] text-muted-foreground/50 mt-1">Double-click node to open report</p>
           </div>
         </div>
       </div>
@@ -506,11 +592,22 @@ export default function LinkAnalysisPage() {
                 <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: `${getSignalColor(selectedNode.signalType)}22`, border: `1.5px solid ${getSignalColor(selectedNode.signalType)}` }}>
                   <Radio className="w-3.5 h-3.5" style={{ color: getSignalColor(selectedNode.signalType) }} />
                 </div>
-                <div>
-                  <p className="text-xs font-medium">{selectedNode.name || "Unknown"}</p>
-                  <p className="text-[9px] text-muted-foreground font-mono">{selectedNode.macAddress || selectedNode.uuid || "N/A"}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{selectedNode.name || "Unknown"}</p>
+                  <p className="text-[9px] text-muted-foreground font-mono truncate">{selectedNode.macAddress || selectedNode.uuid || "N/A"}</p>
                 </div>
               </div>
+
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full"
+                onClick={() => setLocation(`/node-report/${selectedNode.id}`)}
+                data-testid="button-view-report"
+              >
+                <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                View Full Report
+              </Button>
 
               <div className="grid grid-cols-2 gap-2 text-[10px]">
                 <div>
@@ -549,7 +646,13 @@ export default function LinkAnalysisPage() {
                     return (
                       <div key={assoc.id} className="p-2 rounded-md bg-muted/20 space-y-1" data-testid={`inspector-assoc-${assoc.id}`}>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-medium truncate">{linked?.name || `Node #${linkedId}`}</span>
+                          <button
+                            className="text-[10px] font-medium truncate text-left hover:underline cursor-pointer"
+                            onClick={() => setLocation(`/node-report/${linkedId}`)}
+                            data-testid={`link-to-node-${linkedId}`}
+                          >
+                            {linked?.name || `Node #${linkedId}`}
+                          </button>
                           <Badge variant="outline" className="text-[8px]" style={{ borderColor: typeColor, color: typeColor }}>
                             {levelLabel}
                           </Badge>
@@ -566,7 +669,7 @@ export default function LinkAnalysisPage() {
                           )}
                         </div>
                         {evidence?.method && (
-                          <p className="text-[8px] text-muted-foreground/70 italic">{evidence.method as string}</p>
+                          <p className="text-[8px] text-muted-foreground/70 italic">{String(evidence.method)}</p>
                         )}
                       </div>
                     );
@@ -580,7 +683,7 @@ export default function LinkAnalysisPage() {
               <div>
                 <p className="text-xs text-muted-foreground">Select a node to view details</p>
                 <p className="text-[10px] text-muted-foreground/60 mt-1">
-                  Drag nodes to rearrange. Scroll to zoom. Click and drag background to pan.
+                  Drag nodes to rearrange. Scroll to zoom. Click and drag background to pan. Double-click a node to open its report.
                 </p>
               </div>
             </div>

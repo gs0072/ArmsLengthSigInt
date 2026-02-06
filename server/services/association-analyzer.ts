@@ -330,7 +330,7 @@ function analyzeSignalCorrelation(
     .map(o => ({ t: new Date(o.observedAt!).getTime(), v: o.signalStrength! }))
     .sort((a, b) => a.t - b.t);
 
-  if (rssi1.length < 5 || rssi2.length < 5) return null;
+  if (rssi1.length < 8 || rssi2.length < 8) return null;
 
   const timeWindow = 10 * 1000;
   const pairedX: number[] = [];
@@ -423,6 +423,8 @@ function analyzeFrequencySignature(
   const shared = freqs1.filter(f => freqs2Set.has(f.toString()));
   if (shared.length === 0) return null;
 
+  if (freqs1.length <= 1 && freqs2.length <= 1 && shared.length <= 1) return null;
+
   let nonBandShared = 0;
   for (const freq of shared) {
     const freqMHz = freq / 1e6;
@@ -450,13 +452,13 @@ function analyzeFrequencySignature(
     lr = 1 + overlapRatio * 2;
   }
 
-  if (lr < 2.5) return null;
+  if (lr < 3.5) return null;
 
   const posterior = posteriorFromLR(lr, 0.04);
   const confidenceLevel = toConfidenceLevel(posterior);
   const probabilityScale = toProbabilityScale(posterior);
 
-  if (posterior < 0.25) return null;
+  if (posterior < 0.35) return null;
 
   return {
     deviceId1: device1.id,
@@ -495,7 +497,7 @@ function analyzeTemporalCorrelation(
   obs1: Observation[], obs2: Observation[],
   _allObservations: Observation[]
 ): AnalysisResult | null {
-  if (obs1.length < 4 || obs2.length < 4) return null;
+  if (obs1.length < 6 || obs2.length < 6) return null;
 
   const times1 = obs1.map(o => new Date(o.observedAt!).getTime()).sort((a, b) => a - b);
   const times2 = obs2.map(o => new Date(o.observedAt!).getTime()).sort((a, b) => a - b);
@@ -504,9 +506,9 @@ function analyzeTemporalCorrelation(
     times1[times1.length - 1] - times1[0],
     times2[times2.length - 1] - times2[0]
   );
-  if (overallSpan < 60 * 1000) return null;
+  if (overallSpan < 5 * 60 * 1000) return null;
 
-  const activationWindow = 30 * 1000;
+  const activationWindow = 15 * 1000;
 
   let correlatedActivations = 0;
   for (const t1 of times1) {
@@ -521,11 +523,11 @@ function analyzeTemporalCorrelation(
   const observedRate = correlatedActivations / times1.length;
   const expectedRate = Math.min(1, (times2.length * activationWindow * 2) / Math.max(1, overallSpan));
 
-  if (expectedRate >= observedRate * 0.8) return null;
-  if (observedRate < 0.5) return null;
+  if (expectedRate >= observedRate * 0.7) return null;
+  if (observedRate < 0.6) return null;
 
   const lr = observedRate / Math.max(0.01, expectedRate);
-  if (lr < 2) return null;
+  if (lr < 3) return null;
 
   const posterior = posteriorFromLR(lr, 0.05);
   const confidenceLevel = toConfidenceLevel(posterior);
@@ -719,7 +721,7 @@ export function analyzeDeviceAssociations(
       for (const analyze of analyzers) {
         const pairKey = `${Math.min(d1.id, d2.id)}_${Math.max(d1.id, d2.id)}`;
         const result = analyze(d1, d2, obs1, obs2, observations);
-        if (result && result.confidence >= 25) {
+        if (result && result.confidence >= 45) {
           const fullKey = `${pairKey}_${result.associationType}`;
           if (!existingPairs.has(fullKey)) {
             results.push(result);
