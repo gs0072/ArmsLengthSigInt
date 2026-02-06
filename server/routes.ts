@@ -303,7 +303,8 @@ export async function registerRoutes(
         updates.dataMode = parsed.data.dataMode;
       }
       if (parsed.data.settings) updates.settings = parsed.data.settings;
-      const updated = await storage.upsertUserProfile({ ...existing, ...updates, userId });
+      const { id: _id, ...existingWithoutId } = existing;
+      const updated = await storage.upsertUserProfile({ ...existingWithoutId, ...updates });
       res.json(updated);
     } catch (error) {
       console.error("Error updating profile:", error);
