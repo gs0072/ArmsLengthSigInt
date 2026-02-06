@@ -9,6 +9,7 @@ import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickS
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
+import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS } from "./services/association-analyzer";
 
 const updateProfileSchema = z.object({
   dataMode: z.enum(["local", "friends", "public", "osint"]).optional(),
@@ -731,6 +732,216 @@ Be specific, technical, and provide real-world context. If the MAC address is av
     } catch (error) {
       console.error("Error running SDR scan:", error);
       res.status(500).json({ message: "SDR scan failed" });
+    }
+  });
+
+  // ============ ASSOCIATIONS ============
+  app.get("/api/associations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const associations = await storage.getAssociations(userId);
+      res.json(associations);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get associations" });
+    }
+  });
+
+  app.get("/api/associations/device/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const associations = await storage.getAssociationsForDevice(parseInt(req.params.id));
+      res.json(associations);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get device associations" });
+    }
+  });
+
+  app.post("/api/associations/analyze", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const userDevices = await storage.getDevices(userId);
+      const userObservations = await storage.getObservations(userId);
+      const existing = await storage.getAssociations(userId);
+
+      const results = analyzeDeviceAssociations(userDevices, userObservations, existing);
+
+      const created = [];
+      for (const r of results) {
+        const assoc = await storage.createAssociation({
+          userId,
+          deviceId1: r.deviceId1,
+          deviceId2: r.deviceId2,
+          associationType: r.associationType,
+          confidence: r.confidence,
+          reasoning: r.reasoning,
+          evidence: r.evidence,
+          observationCount: 1,
+          isConfirmed: false,
+        });
+        created.push(assoc);
+      }
+
+      await storage.logActivity(userId, "association_analysis", `Analyzed ${userDevices.length} devices, found ${created.length} new associations`);
+      res.json({ analyzed: userDevices.length, newAssociations: created.length, associations: created });
+    } catch (error) {
+      console.error("Error analyzing associations:", error);
+      res.status(500).json({ message: "Association analysis failed" });
+    }
+  });
+
+  app.post("/api/associations", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        deviceId1: z.number().int(),
+        deviceId2: z.number().int(),
+        associationType: z.enum(["co_movement", "signal_correlation", "command_control", "network_peer", "proximity_pattern", "frequency_sharing", "temporal_correlation", "manual"]),
+        confidence: z.number().min(0).max(100).default(50),
+        reasoning: z.string().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const userId = req.user.claims.sub;
+      const assoc = await storage.createAssociation({
+        userId,
+        ...parsed.data,
+        evidence: { source: "manual" },
+        observationCount: 1,
+        isConfirmed: parsed.data.associationType === "manual",
+      });
+      res.json(assoc);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create association" });
+    }
+  });
+
+  app.delete("/api/associations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      await storage.deleteAssociation(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete association" });
+    }
+  });
+
+  app.get("/api/associations/types", isAuthenticated, async (_req: any, res) => {
+    res.json(ASSOCIATION_TYPE_LABELS);
+  });
+
+  // ============ EXPORT / IMPORT ============
+  app.get("/api/export", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const userDevices = await storage.getDevices(userId);
+      const userObservations = await storage.getObservations(userId);
+      const userAlerts = await storage.getAlerts(userId);
+      const userSensors = await storage.getSensors(userId);
+      const userAssociations = await storage.getAssociations(userId);
+
+      const exportData = {
+        version: "1.0",
+        exportedAt: new Date().toISOString(),
+        data: {
+          devices: userDevices,
+          observations: userObservations,
+          alerts: userAlerts,
+          sensors: userSensors,
+          associations: userAssociations,
+        },
+      };
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="sigint-export-${new Date().toISOString().split("T")[0]}.json"`);
+      res.json(exportData);
+    } catch (error) {
+      res.status(500).json({ message: "Export failed" });
+    }
+  });
+
+  app.post("/api/import", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { data } = req.body;
+      if (!data) return res.status(400).json({ message: "No data provided" });
+
+      let imported = { devices: 0, observations: 0, alerts: 0, sensors: 0, associations: 0 };
+      const idMap = new Map<number, number>();
+
+      if (data.devices) {
+        for (const d of data.devices) {
+          const existing = d.macAddress ? await storage.getDeviceByMac(userId, d.macAddress) : null;
+          if (existing) {
+            idMap.set(d.id, existing.id);
+            continue;
+          }
+          const created = await storage.createDevice({
+            userId,
+            name: d.name,
+            macAddress: d.macAddress,
+            uuid: d.uuid,
+            manufacturer: d.manufacturer,
+            model: d.model,
+            deviceType: d.deviceType,
+            signalType: d.signalType || "unknown",
+            notes: d.notes,
+            isTracked: d.isTracked,
+            isFlagged: d.isFlagged,
+            metadata: d.metadata,
+          });
+          idMap.set(d.id, created.id);
+          imported.devices++;
+        }
+      }
+
+      if (data.observations) {
+        for (const o of data.observations) {
+          const deviceId = idMap.get(o.deviceId) || o.deviceId;
+          await storage.createObservation({
+            deviceId,
+            userId,
+            signalType: o.signalType,
+            signalStrength: o.signalStrength,
+            frequency: o.frequency,
+            latitude: o.latitude,
+            longitude: o.longitude,
+            altitude: o.altitude,
+            heading: o.heading,
+            speed: o.speed,
+            rawData: o.rawData,
+            hexData: o.hexData,
+            asciiData: o.asciiData,
+            channel: o.channel,
+            protocol: o.protocol,
+            encryption: o.encryption,
+            metadata: o.metadata,
+          });
+          imported.observations++;
+        }
+      }
+
+      if (data.associations) {
+        for (const a of data.associations) {
+          const d1 = idMap.get(a.deviceId1) || a.deviceId1;
+          const d2 = idMap.get(a.deviceId2) || a.deviceId2;
+          await storage.createAssociation({
+            userId,
+            deviceId1: d1,
+            deviceId2: d2,
+            associationType: a.associationType,
+            confidence: a.confidence,
+            reasoning: a.reasoning,
+            evidence: a.evidence,
+            observationCount: a.observationCount,
+            isConfirmed: a.isConfirmed,
+          });
+          imported.associations++;
+        }
+      }
+
+      await storage.logActivity(userId, "data_import", `Imported ${imported.devices} devices, ${imported.observations} observations, ${imported.associations} associations`);
+      res.json({ success: true, imported });
+    } catch (error) {
+      console.error("Error importing data:", error);
+      res.status(500).json({ message: "Import failed" });
     }
   });
 

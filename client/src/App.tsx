@@ -20,6 +20,7 @@ import CatalogPage from "@/pages/catalog";
 import SettingsPage from "@/pages/settings";
 import NodeReportPage from "@/pages/node-report";
 import ToolsPage from "@/pages/tools";
+import LinkAnalysisPage from "@/pages/link-analysis";
 import type { Alert, UserProfile, Device } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 
@@ -34,6 +35,7 @@ function AuthenticatedRouter() {
       <Route path="/counter-intel" component={CounterIntelPage} />
       <Route path="/catalog" component={CatalogPage} />
       <Route path="/tools" component={ToolsPage} />
+      <Route path="/link-analysis" component={LinkAnalysisPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/node-report/:id" component={NodeReportPage} />
       <Route component={NotFound} />

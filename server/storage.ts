@@ -1,5 +1,5 @@
 import {
-  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors,
+  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations,
   type User, type UpsertUser,
   type Device, type InsertDevice,
   type Observation, type InsertObservation,
@@ -9,6 +9,7 @@ import {
   type ActivityLogEntry,
   type FollowingDetectionEntry,
   type CollectionSensor, type InsertCollectionSensor,
+  type DeviceAssociation, type InsertDeviceAssociation,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
@@ -51,6 +52,12 @@ export interface IStorage {
   createSensor(sensor: InsertCollectionSensor): Promise<CollectionSensor>;
   updateSensor(id: number, updates: Partial<InsertCollectionSensor>): Promise<CollectionSensor | undefined>;
   deleteSensor(id: number): Promise<void>;
+
+  getAssociations(userId: string): Promise<DeviceAssociation[]>;
+  getAssociationsForDevice(deviceId: number): Promise<DeviceAssociation[]>;
+  createAssociation(assoc: InsertDeviceAssociation): Promise<DeviceAssociation>;
+  updateAssociation(id: number, updates: Partial<InsertDeviceAssociation>): Promise<DeviceAssociation | undefined>;
+  deleteAssociation(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -217,6 +224,30 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSensor(id: number): Promise<void> {
     await db.delete(collectionSensors).where(eq(collectionSensors.id, id));
+  }
+
+  async getAssociations(userId: string): Promise<DeviceAssociation[]> {
+    return db.select().from(deviceAssociations).where(eq(deviceAssociations.userId, userId)).orderBy(desc(deviceAssociations.confidence));
+  }
+
+  async getAssociationsForDevice(deviceId: number): Promise<DeviceAssociation[]> {
+    return db.select().from(deviceAssociations).where(
+      or(eq(deviceAssociations.deviceId1, deviceId), eq(deviceAssociations.deviceId2, deviceId))
+    ).orderBy(desc(deviceAssociations.confidence));
+  }
+
+  async createAssociation(assoc: InsertDeviceAssociation): Promise<DeviceAssociation> {
+    const [created] = await db.insert(deviceAssociations).values(assoc).returning();
+    return created;
+  }
+
+  async updateAssociation(id: number, updates: Partial<InsertDeviceAssociation>): Promise<DeviceAssociation | undefined> {
+    const [updated] = await db.update(deviceAssociations).set(updates).where(eq(deviceAssociations.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async deleteAssociation(id: number): Promise<void> {
+    await db.delete(deviceAssociations).where(eq(deviceAssociations.id, id));
   }
 }
 

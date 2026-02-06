@@ -17,6 +17,27 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
   - `ble-scanner.ts` has `startPassiveScan()` / `stopPassiveScan()` with BLE and WiFi device pools
   - Dashboard live signal feed shows discovered nodes in real-time during scanning
   - Each discovered node is persisted to DB with GPS auto-tagging
+- **Device Associations (SIGINT Intelligence Links)**:
+  - `device_associations` table tracking co-movement, signal correlation, C2, network peer, proximity, frequency, temporal patterns
+  - Association analyzer service with five SIGINT algorithms: haversine distance co-movement, RSSI correlation, proximity patterns, frequency overlap, temporal activation sync
+  - Confidence scores (0-100%) with reasoning text and JSON evidence payloads
+  - Full CRUD API (`/api/associations`) plus automated analysis endpoint (`/api/associations/analyze`)
+  - DeviceDetail Links tab shows real associations with color-coded type badges, confidence indicators, and clickable detail popups
+- **Link Analysis Page** (/link-analysis) - Palantir-style force-directed graph visualization
+  - Canvas-based interactive graph with physics simulation (repulsion + spring forces)
+  - Drag nodes to rearrange, scroll to zoom, pan background
+  - Color-coded edges by association type, dashed lines for low confidence
+  - Node inspector panel showing device details and connected associations
+  - Legend overlay for association type colors
+- **Heat Map Visualization**:
+  - Leaflet.heat integration on World Map with toggle button
+  - Signal density visualization with RSSI-weighted intensity
+  - Gradient: dark blue (low) through cyan/green to yellow/red (high intensity)
+  - Zoom-dependent detail level (maxZoom: 17)
+- **Data Export/Import**:
+  - Full backup/restore of devices, observations, alerts, sensors, associations
+  - Version-tagged export format with device ID remapping on import
+  - MAC address deduplication during import
 - **Map (Meshtastic-style navigation)**:
   - Location search via Nominatim geocoding + coordinate parsing (decimal, DMS, degrees/minutes)
   - Fly-to with zoom on search result selection (zoom level 15)
@@ -60,6 +81,7 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 - `server/services/meshtastic-service.ts` - Meshtastic device connection management via HTTP API
 - `server/services/sdr-service.ts` - RTL-SDR tool detection, device listing, spectrum scanning
 - `server/services/system-info.ts` - OS detection, tool availability checking, network interface listing
+- `server/services/association-analyzer.ts` - SIGINT association detection with five algorithmic analyzers
 
 ## Key Design Decisions
 - Cyberpunk/tech-movie dark theme with cyan (#00d4ff) primary color and purple accents
@@ -73,14 +95,14 @@ A comprehensive signal intelligence platform for collecting, analyzing, and tria
 ## File Structure
 - `shared/schema.ts` - All Drizzle models and TypeScript types
 - `shared/models/auth.ts` - Replit Auth user/session schemas
-- `server/routes.ts` - API endpoints (devices, observations, alerts, sensors, nmap, meshtastic, sdr, system)
+- `server/routes.ts` - API endpoints (devices, observations, alerts, sensors, associations, export/import, nmap, meshtastic, sdr, system)
 - `server/storage.ts` - Database storage layer (DatabaseStorage)
 - `server/seed.ts` - Sample data seeder
 - `server/db.ts` - Database connection
 - `server/services/` - Backend service modules (nmap, meshtastic, sdr, system-info)
 - `server/replit_integrations/auth/` - Authentication module
 - `client/src/App.tsx` - Main app with routing and sidebar layout
-- `client/src/pages/` - Dashboard, WorldMap, Devices, Search, Monitoring, CounterIntel, Catalog, Tools, Settings, Landing, NodeReport
+- `client/src/pages/` - Dashboard, WorldMap, Devices, Search, Monitoring, CounterIntel, Catalog, Tools, LinkAnalysis, Settings, Landing, NodeReport
 - `client/src/components/` - Reusable components (AppSidebar, MapView, DeviceList, DeviceDetail, DeviceAnalysis, StatsBar, etc.)
 - `client/src/lib/signal-utils.ts` - Signal type definitions, utilities, device catalog data
 - `client/src/lib/ble-scanner.ts` - Passive scanning simulation and GPS geolocation

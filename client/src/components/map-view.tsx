@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Maximize2, Minimize2, Crosshair, Search, X, Loader2 } from "lucide-react";
+import { Maximize2, Minimize2, Crosshair, Search, X, Loader2, Layers } from "lucide-react";
 import type { Observation, Device } from "@shared/schema";
 import { getSignalColor } from "@/lib/signal-utils";
 
@@ -101,6 +101,7 @@ export function MapView({
   const mapInstanceRef = useRef<any>(null);
   const leafletRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
+  const heatLayerRef = useRef<any>(null);
   const searchMarkerRef = useRef<any>(null);
   const userLocationMarkerRef = useRef<any>(null);
   const initialFitDoneRef = useRef(false);
@@ -112,12 +113,14 @@ export function MapView({
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [showHeatMap, setShowHeatMap] = useState(true);
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const loadLeaflet = async () => {
       const L = await import("leaflet");
+      await import("leaflet.heat");
       leafletRef.current = L;
 
       const link = document.createElement("link");
@@ -169,13 +172,40 @@ export function MapView({
     if (!mapInstanceRef.current || !leafletRef.current) return;
 
     const L = leafletRef.current;
+    const map = mapInstanceRef.current;
 
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    const map = mapInstanceRef.current;
+    if (heatLayerRef.current) {
+      map.removeLayer(heatLayerRef.current);
+      heatLayerRef.current = null;
+    }
 
     const obsWithLocation = observations.filter(o => o.latitude && o.longitude);
+
+    if (showHeatMap && obsWithLocation.length > 0 && (L as any).heatLayer) {
+      const heatData = obsWithLocation.map(obs => {
+        const intensity = obs.signalStrength ? Math.min(1, Math.max(0.3, (obs.signalStrength + 100) / 60)) : 0.5;
+        return [obs.latitude!, obs.longitude!, intensity];
+      });
+
+      heatLayerRef.current = (L as any).heatLayer(heatData, {
+        radius: 25,
+        blur: 20,
+        maxZoom: 17,
+        max: 1.0,
+        minOpacity: 0.4,
+        gradient: {
+          0.0: "#000033",
+          0.2: "#0033cc",
+          0.4: "#00d4ff",
+          0.6: "#33ff99",
+          0.8: "#ffcc00",
+          1.0: "#ff3300",
+        },
+      }).addTo(map);
+    }
 
     obsWithLocation.forEach(obs => {
       const device = devices.find(d => d.id === obs.deviceId);
@@ -228,7 +258,7 @@ export function MapView({
       setTimeout(() => { programmaticMoveRef.current = false; }, 500);
       initialFitDoneRef.current = true;
     }
-  }, [observations, devices, selectedDeviceId, onSelectDevice]);
+  }, [observations, devices, selectedDeviceId, onSelectDevice, showHeatMap]);
 
   useEffect(() => {
     if (mapInstanceRef.current) {
@@ -425,6 +455,16 @@ export function MapView({
         </div>
 
         <div className="flex gap-1 shrink-0">
+          <Button
+            size="icon"
+            variant="secondary"
+            onClick={() => setShowHeatMap(prev => !prev)}
+            className={`h-8 w-8 toggle-elevate ${showHeatMap ? "toggle-elevated" : ""}`}
+            data-testid="button-toggle-heatmap"
+            title={showHeatMap ? "Hide heat map" : "Show heat map"}
+          >
+            <Layers className="w-4 h-4" />
+          </Button>
           <Button
             size="icon"
             variant="secondary"
