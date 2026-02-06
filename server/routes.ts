@@ -30,6 +30,24 @@ const createDeviceSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+const createSensorSchema = z.object({
+  name: z.string().min(1),
+  sensorType: z.enum(["bluetooth", "wifi", "rfid", "sdr", "lora", "meshtastic", "adsb", "sensor", "unknown"]),
+  connectionMethod: z.enum(["builtin", "bluetooth", "usb", "serial", "network"]).default("builtin"),
+  status: z.enum(["idle", "connecting", "collecting", "error", "disconnected"]).optional(),
+  config: z.record(z.unknown()).optional(),
+  notes: z.string().optional(),
+  nodesCollected: z.number().int().optional(),
+});
+
+const updateSensorSchema = z.object({
+  name: z.string().min(1).optional(),
+  status: z.enum(["idle", "connecting", "collecting", "error", "disconnected"]).optional(),
+  config: z.record(z.unknown()).optional(),
+  notes: z.string().optional(),
+  nodesCollected: z.number().int().optional(),
+});
+
 const createObservationSchema = z.object({
   deviceId: z.number().int(),
   signalType: z.enum(["bluetooth", "wifi", "rfid", "sdr", "lora", "meshtastic", "adsb", "sensor", "unknown"]),
@@ -322,6 +340,66 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching following detection:", error);
       res.status(500).json({ message: "Failed to fetch following detection data" });
+    }
+  });
+
+  app.get("/api/sensors", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const sensors = await storage.getSensors(userId);
+      res.json(sensors);
+    } catch (error) {
+      console.error("Error fetching sensors:", error);
+      res.status(500).json({ message: "Failed to fetch sensors" });
+    }
+  });
+
+  app.post("/api/sensors", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const parsed = createSensorSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const sensor = await storage.createSensor({ ...parsed.data, userId });
+      await storage.logActivity(userId, "create_sensor", `Added collection sensor: ${sensor.name}`, req.ip);
+      res.status(201).json(sensor);
+    } catch (error) {
+      console.error("Error creating sensor:", error);
+      res.status(500).json({ message: "Failed to create sensor" });
+    }
+  });
+
+  app.patch("/api/sensors/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const sensor = await storage.getSensor(id);
+      if (!sensor || sensor.userId !== userId) {
+        return res.status(404).json({ message: "Sensor not found" });
+      }
+      const parsed = updateSensorSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const updated = await storage.updateSensor(id, parsed.data);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating sensor:", error);
+      res.status(500).json({ message: "Failed to update sensor" });
+    }
+  });
+
+  app.delete("/api/sensors/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const sensor = await storage.getSensor(id);
+      if (!sensor || sensor.userId !== userId) {
+        return res.status(404).json({ message: "Sensor not found" });
+      }
+      await storage.deleteSensor(id);
+      await storage.logActivity(userId, "delete_sensor", `Removed collection sensor: ${sensor.name}`, req.ip);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting sensor:", error);
+      res.status(500).json({ message: "Failed to delete sensor" });
     }
   });
 
