@@ -5,9 +5,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SignalBadge, SignalStrengthBar } from "./signal-badge";
 import { GlowLine } from "./scan-animation";
+import { AddObservationDialog } from "./add-observation-dialog";
 import {
   X, Eye, EyeOff, Flag, MapPin, Clock, Radio, Link2,
-  FileText, AlertTriangle, Globe, Fingerprint, Copy, ExternalLink, Brain
+  FileText, AlertTriangle, Globe, Fingerprint, Copy, ExternalLink, Brain, Plus
 } from "lucide-react";
 import { useLocation } from "wouter";
 import type { Device, Observation } from "@shared/schema";
@@ -44,6 +45,14 @@ export function DeviceDetail({ device, observations, onClose, onToggleTrack, onT
           </p>
         </div>
         <div className="flex items-center gap-1">
+          <AddObservationDialog
+            device={device}
+            trigger={
+              <Button size="icon" variant="ghost" data-testid="button-add-obs-detail" title="Log new observation">
+                <Plus className="w-4 h-4 text-chart-3" />
+              </Button>
+            }
+          />
           <Button
             size="icon"
             variant="ghost"

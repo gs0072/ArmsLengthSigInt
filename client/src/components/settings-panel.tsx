@@ -4,13 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, Zap, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Radar, Satellite, CircuitBoard, Thermometer, Usb } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X } from "lucide-react";
 import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { isWebBluetoothSupported } from "@/lib/ble-scanner";
 import type { UserProfile } from "@shared/schema";
 
 interface SettingsPanelProps {
@@ -22,34 +22,14 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storageLimit, userTier }: SettingsPanelProps) {
-  const [autoScan, setAutoScan] = useState(true);
-  const [scanInterval, setScanInterval] = useState([5]);
   const [showNotifications, setShowNotifications] = useState(true);
   const [followingDetection, setFollowingDetection] = useState(true);
-  const [interrogationDetection, setInterrogationDetection] = useState(true);
-  const [hardwareSources, setHardwareSources] = useState({
-    bleAdapter: { enabled: true, label: "Bluetooth (BLE) Adapter", icon: Bluetooth, description: "Scan for BLE devices, beacons, and peripherals", interface: "USB / Built-in", color: "hsl(217, 91%, 60%)" },
-    wifiAdapter: { enabled: true, label: "Wi-Fi Adapter", icon: Wifi, description: "Monitor Wi-Fi networks, access points, and clients", interface: "USB / Built-in", color: "hsl(142, 76%, 48%)" },
-    sdrReceiver: { enabled: false, label: "SDR Receiver", icon: Antenna, description: "RTL-SDR, HackRF, or other software-defined radio", interface: "USB", color: "hsl(280, 65%, 55%)" },
-    loraRadio: { enabled: false, label: "LoRa / Meshtastic Radio", icon: Radio, description: "LoRa mesh network nodes and Meshtastic devices", interface: "USB / Serial", color: "hsl(25, 85%, 55%)" },
-    rfidReader: { enabled: false, label: "RFID Reader", icon: CircuitBoard, description: "Proxmark3, ACR122U, or other NFC/RFID readers", interface: "USB", color: "hsl(45, 90%, 55%)" },
-    adsbReceiver: { enabled: false, label: "ADS-B Receiver", icon: Satellite, description: "Aircraft transponder receiver (1090 MHz)", interface: "USB / RTL-SDR", color: "hsl(0, 72%, 55%)" },
-    gpsModule: { enabled: true, label: "GPS Module", icon: Radar, description: "Location tracking via GPS/GNSS receiver", interface: "USB / Built-in", color: "hsl(185, 100%, 50%)" },
-    externalSensors: { enabled: false, label: "External Sensors", icon: Thermometer, description: "Environmental sensors (temp, humidity, EMF)", interface: "USB / I2C / SPI", color: "hsl(320, 70%, 55%)" },
-  });
-  const [signalFilters, setSignalFilters] = useState({
-    bluetooth: true,
-    wifi: true,
-    rfid: true,
-    sdr: true,
-    lora: true,
-    meshtastic: true,
-    adsb: true,
-    sensor: true,
-  });
+  const [confirmClear, setConfirmClear] = useState(false);
   const { toast } = useToast();
 
   const isAdmin = userTier === "admin";
+  const hasBluetooth = isWebBluetoothSupported();
+  const hasGeolocation = typeof navigator !== "undefined" && "geolocation" in navigator;
 
   const { data: adminUsers = [] } = useQuery<UserProfile[]>({
     queryKey: ["/api/admin/users"],
@@ -66,6 +46,23 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to update user tier.", variant: "destructive" });
+    },
+  });
+
+  const clearDataMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/clear-data");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/following-detection"] });
+      setConfirmClear(false);
+      toast({ title: "Data Cleared", description: "All devices, observations, and alerts have been removed. You can now start collecting real data." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to clear data.", variant: "destructive" });
     },
   });
 
@@ -91,6 +88,17 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     enterprise: "100 GB storage, full OSINT integration, priority processing",
     admin: "10 GB storage, full platform access, user management, system configuration",
   };
+
+  const capabilities = [
+    { label: "Bluetooth (BLE)", icon: Bluetooth, available: hasBluetooth, description: hasBluetooth ? "Ready - use BLE Scan to discover devices" : "Not available in this browser (use Chrome/Edge)", color: "hsl(217, 91%, 60%)" },
+    { label: "GPS / Geolocation", icon: Radar, available: hasGeolocation, description: hasGeolocation ? "Ready - auto-tags observations with your location" : "Not available", color: "hsl(185, 100%, 50%)" },
+    { label: "Wi-Fi Scanning", icon: Wifi, available: false, description: "Requires native companion app (browser limitation)", color: "hsl(142, 76%, 48%)" },
+    { label: "SDR Receiver", icon: Antenna, available: false, description: "Requires native desktop app with USB hardware", color: "hsl(280, 65%, 55%)" },
+    { label: "LoRa / Meshtastic", icon: Radio, available: false, description: "Requires native app with serial/USB connection", color: "hsl(25, 85%, 55%)" },
+    { label: "RFID Reader", icon: CircuitBoard, available: false, description: "Requires native app with USB hardware", color: "hsl(45, 90%, 55%)" },
+    { label: "ADS-B Receiver", icon: Satellite, available: false, description: "Requires native app with RTL-SDR hardware", color: "hsl(0, 72%, 55%)" },
+    { label: "External Sensors", icon: Thermometer, available: false, description: "Requires native app with I2C/SPI hardware", color: "hsl(320, 70%, 55%)" },
+  ];
 
   return (
     <Card className="flex flex-col h-full overflow-visible">
@@ -169,103 +177,57 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
         <GlowLine />
 
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-3.5 h-3.5 text-muted-foreground" />
-            <h4 className="text-xs font-medium">Scanning</h4>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <Label className="text-xs">Auto-scan</Label>
-            <Switch checked={autoScan} onCheckedChange={setAutoScan} data-testid="switch-auto-scan" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Scan interval: {scanInterval[0]}s</Label>
-            <Slider value={scanInterval} onValueChange={setScanInterval} min={1} max={30} step={1} />
-          </div>
-        </div>
-
-        <GlowLine />
-
-        <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Usb className="w-3.5 h-3.5 text-primary" />
-              <h4 className="text-xs font-medium">Hardware Sources</h4>
+              <Cpu className="w-3.5 h-3.5 text-primary" />
+              <h4 className="text-xs font-medium">Collection Capabilities</h4>
             </div>
             <Badge variant="outline" className="text-[8px] uppercase tracking-wider">
-              {Object.values(hardwareSources).filter(h => h.enabled).length} / {Object.values(hardwareSources).length} Active
+              {capabilities.filter(c => c.available).length} / {capabilities.length} Available
             </Badge>
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Select which hardware interfaces to use for signal collection. Native companion apps required for direct hardware access.
+            Browser-based collection supports Bluetooth and GPS. Other hardware requires native companion apps (planned).
           </p>
           <div className="space-y-2">
-            {Object.entries(hardwareSources).map(([key, hw]) => {
-              const IconComp = hw.icon;
+            {capabilities.map((cap) => {
+              const IconComp = cap.icon;
               return (
                 <div
-                  key={key}
+                  key={cap.label}
                   className={`flex items-center justify-between gap-3 p-2 rounded-md border transition-colors ${
-                    hw.enabled
+                    cap.available
                       ? "border-border/50 bg-muted/10"
                       : "border-border/20 bg-transparent opacity-60"
                   }`}
-                  data-testid={`hardware-${key}`}
+                  data-testid={`capability-${cap.label.toLowerCase().replace(/[^a-z]/g, "-")}`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <div
                       className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: hw.enabled ? `${hw.color}` : undefined, opacity: hw.enabled ? 0.15 : 0.05 }}
+                      style={{ backgroundColor: cap.available ? cap.color : undefined, opacity: cap.available ? 0.15 : 0.05 }}
                     >
-                      <IconComp className="w-3.5 h-3.5" style={{ color: hw.enabled ? hw.color : undefined }} />
+                      <IconComp className="w-3.5 h-3.5" style={{ color: cap.available ? cap.color : undefined }} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-medium truncate">{hw.label}</span>
-                        {hw.enabled && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                        )}
+                        <span className="text-[11px] font-medium truncate">{cap.label}</span>
                       </div>
-                      <p className="text-[9px] text-muted-foreground truncate">{hw.description}</p>
-                      <p className="text-[8px] text-muted-foreground/60 font-mono">{hw.interface}</p>
+                      <p className="text-[9px] text-muted-foreground truncate">{cap.description}</p>
                     </div>
                   </div>
-                  <Switch
-                    checked={hw.enabled}
-                    onCheckedChange={v => {
-                      setHardwareSources(prev => ({
-                        ...prev,
-                        [key]: { ...prev[key as keyof typeof prev], enabled: v },
-                      }));
-                      toast({
-                        title: v ? "Hardware Enabled" : "Hardware Disabled",
-                        description: `${hw.label} has been ${v ? "activated" : "deactivated"}.`,
-                      });
-                    }}
-                    data-testid={`switch-hardware-${key}`}
-                  />
+                  {cap.available ? (
+                    <Check className="w-4 h-4 text-green-500 shrink-0" />
+                  ) : (
+                    <X className="w-4 h-4 text-muted-foreground/40 shrink-0" />
+                  )}
                 </div>
               );
             })}
           </div>
-        </div>
-
-        <GlowLine />
-
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Radio className="w-3.5 h-3.5 text-muted-foreground" />
-            <h4 className="text-xs font-medium">Signal Filters</h4>
-          </div>
-          {Object.entries(signalFilters).map(([key, val]) => (
-            <div key={key} className="flex items-center justify-between gap-2">
-              <Label className="text-xs capitalize">{key === "adsb" ? "ADS-B" : key}</Label>
-              <Switch
-                checked={val}
-                onCheckedChange={v => setSignalFilters(prev => ({ ...prev, [key]: v }))}
-                data-testid={`switch-filter-${key}`}
-              />
-            </div>
-          ))}
+          <p className="text-[10px] text-muted-foreground/70 italic">
+            You can always add devices and log observations manually, regardless of hardware availability.
+          </p>
         </div>
 
         <GlowLine />
@@ -283,10 +245,58 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             <Label className="text-xs">Following Detection</Label>
             <Switch checked={followingDetection} onCheckedChange={setFollowingDetection} data-testid="switch-following" />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <Label className="text-xs">Interrogation Detection</Label>
-            <Switch checked={interrogationDetection} onCheckedChange={setInterrogationDetection} data-testid="switch-interrogation" />
+        </div>
+
+        <GlowLine />
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Database className="w-3.5 h-3.5 text-muted-foreground" />
+            <h4 className="text-xs font-medium">Data Management</h4>
           </div>
+          <p className="text-[10px] text-muted-foreground">
+            Clear all demo/seed data to start fresh with your own real collections. This will remove all devices, observations, and alerts.
+          </p>
+          {!confirmClear ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => setConfirmClear(true)}
+              data-testid="button-clear-data"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              Clear All Data
+            </Button>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/30">
+                <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
+                <p className="text-[10px] text-destructive">This will permanently delete all your devices, observations, and alerts. This cannot be undone.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setConfirmClear(false)}
+                  data-testid="button-cancel-clear"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={() => clearDataMutation.mutate()}
+                  disabled={clearDataMutation.isPending}
+                  data-testid="button-confirm-clear"
+                >
+                  {clearDataMutation.isPending ? "Clearing..." : "Confirm Delete"}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         {isAdmin && (

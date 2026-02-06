@@ -19,7 +19,7 @@ import CounterIntelPage from "@/pages/counter-intel";
 import CatalogPage from "@/pages/catalog";
 import SettingsPage from "@/pages/settings";
 import NodeReportPage from "@/pages/node-report";
-import type { Alert, UserProfile } from "@shared/schema";
+import type { Alert, UserProfile, Device } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 
 function AuthenticatedRouter() {
@@ -43,6 +43,7 @@ function AuthenticatedApp() {
   const { user } = useAuth();
   const { data: alerts = [] } = useQuery<Alert[]>({ queryKey: ["/api/alerts"] });
   const { data: profile } = useQuery<UserProfile>({ queryKey: ["/api/profile"] });
+  const { data: devices = [] } = useQuery<Device[]>({ queryKey: ["/api/devices"] });
   const activeAlerts = alerts.filter(a => a.status === "active" || a.status === "triggered");
 
   const style = {
@@ -56,7 +57,7 @@ function AuthenticatedApp() {
         <AppSidebar
           user={user ?? null}
           alertCount={activeAlerts.length}
-          scanning={true}
+          deviceCount={devices.length}
           profile={profile ?? null}
         />
         <div className="flex flex-col flex-1 min-w-0">

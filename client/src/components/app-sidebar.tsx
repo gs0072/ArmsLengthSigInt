@@ -20,12 +20,11 @@ import {
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import type { UserProfile } from "@shared/schema";
-import { ScanPulse } from "./scan-animation";
 
 interface AppSidebarProps {
   user: User | null;
   alertCount: number;
-  scanning: boolean;
+  deviceCount: number;
   profile?: UserProfile | null;
 }
 
@@ -40,7 +39,7 @@ const navItems = [
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 
-export function AppSidebar({ user, alertCount, scanning, profile }: AppSidebarProps) {
+export function AppSidebar({ user, alertCount, deviceCount, profile }: AppSidebarProps) {
   const [location, setLocation] = useLocation();
 
   return (
@@ -49,7 +48,7 @@ export function AppSidebar({ user, alertCount, scanning, profile }: AppSidebarPr
         <div className="flex items-center gap-3">
           <div className="relative">
             <Radar className="w-8 h-8 text-primary" />
-            {scanning && (
+            {deviceCount > 0 && (
               <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-chart-3 animate-pulse" />
             )}
           </div>
@@ -104,11 +103,8 @@ export function AppSidebar({ user, alertCount, scanning, profile }: AppSidebarPr
           <SidebarGroupContent>
             <div className="px-3 py-2 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Scanner</span>
-                <div className="flex items-center gap-1.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${scanning ? "bg-chart-3 animate-pulse" : "bg-muted-foreground"}`} />
-                  <span className="text-[10px]">{scanning ? "Active" : "Idle"}</span>
-                </div>
+                <span className="text-[10px] text-muted-foreground">Devices</span>
+                <span className="text-[10px] font-mono">{deviceCount}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-muted-foreground">Data Mode</span>

@@ -16,6 +16,39 @@ const adminUpdateUserSchema = z.object({
   storageLimitBytes: z.number().int().min(0).optional(),
 });
 
+const createDeviceSchema = z.object({
+  name: z.string().optional(),
+  macAddress: z.string().optional(),
+  uuid: z.string().optional(),
+  manufacturer: z.string().optional(),
+  model: z.string().optional(),
+  deviceType: z.string().optional(),
+  signalType: z.enum(["bluetooth", "wifi", "rfid", "sdr", "lora", "meshtastic", "adsb", "sensor", "unknown"]).default("unknown"),
+  notes: z.string().optional(),
+  isTracked: z.boolean().optional(),
+  isFlagged: z.boolean().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const createObservationSchema = z.object({
+  deviceId: z.number().int(),
+  signalType: z.enum(["bluetooth", "wifi", "rfid", "sdr", "lora", "meshtastic", "adsb", "sensor", "unknown"]),
+  signalStrength: z.number().optional(),
+  frequency: z.number().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  altitude: z.number().optional(),
+  heading: z.number().optional(),
+  speed: z.number().optional(),
+  rawData: z.string().optional(),
+  hexData: z.string().optional(),
+  asciiData: z.string().optional(),
+  channel: z.number().int().optional(),
+  protocol: z.string().optional(),
+  encryption: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -49,7 +82,9 @@ export async function registerRoutes(
   app.post("/api/devices", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const device = await storage.createDevice({ ...req.body, userId });
+      const parsed = createDeviceSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const device = await storage.createDevice({ ...parsed.data, userId });
       await storage.logActivity(userId, "create_device", `Created device: ${device.name || device.id}`, req.ip);
       res.status(201).json(device);
     } catch (error) {
@@ -135,11 +170,13 @@ export async function registerRoutes(
   app.post("/api/observations", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const device = await storage.getDevice(req.body.deviceId);
+      const parsed = createObservationSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const device = await storage.getDevice(parsed.data.deviceId);
       if (!device || device.userId !== userId) {
         return res.status(404).json({ message: "Device not found" });
       }
-      const observation = await storage.createObservation({ ...req.body, userId });
+      const observation = await storage.createObservation({ ...parsed.data, userId });
       res.status(201).json(observation);
     } catch (error) {
       console.error("Error creating observation:", error);
@@ -285,6 +322,30 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching following detection:", error);
       res.status(500).json({ message: "Failed to fetch following detection data" });
+    }
+  });
+
+  app.get("/api/devices/by-mac/:mac", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const mac = decodeURIComponent(req.params.mac);
+      const device = await storage.getDeviceByMac(userId, mac);
+      res.json(device || null);
+    } catch (error) {
+      console.error("Error fetching device by MAC:", error);
+      res.status(500).json({ message: "Failed to fetch device" });
+    }
+  });
+
+  app.post("/api/clear-data", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      await storage.clearUserData(userId);
+      await storage.logActivity(userId, "clear_data", "User cleared all data");
+      res.json({ message: "All data cleared successfully" });
+    } catch (error) {
+      console.error("Error clearing data:", error);
+      res.status(500).json({ message: "Failed to clear data" });
     }
   });
 

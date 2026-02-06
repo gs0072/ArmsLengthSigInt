@@ -42,6 +42,8 @@ export interface IStorage {
   logActivity(userId: string, action: string, details?: string, ipAddress?: string): Promise<void>;
 
   getFollowingDetection(userId: string): Promise<FollowingDetectionEntry[]>;
+  getDeviceByMac(userId: string, macAddress: string): Promise<Device | undefined>;
+  clearUserData(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -170,6 +172,21 @@ export class DatabaseStorage implements IStorage {
 
   async getFollowingDetection(userId: string): Promise<FollowingDetectionEntry[]> {
     return db.select().from(followingDetection).where(eq(followingDetection.userId, userId)).orderBy(desc(followingDetection.riskScore));
+  }
+
+  async getDeviceByMac(userId: string, macAddress: string): Promise<Device | undefined> {
+    const [device] = await db.select().from(devices).where(
+      and(eq(devices.userId, userId), eq(devices.macAddress, macAddress))
+    );
+    return device || undefined;
+  }
+
+  async clearUserData(userId: string): Promise<void> {
+    await db.delete(observations).where(eq(observations.userId, userId));
+    await db.delete(alerts).where(eq(alerts.userId, userId));
+    await db.delete(followingDetection).where(eq(followingDetection.userId, userId));
+    await db.delete(devices).where(eq(devices.userId, userId));
+    await db.delete(activityLog).where(eq(activityLog.userId, userId));
   }
 }
 
