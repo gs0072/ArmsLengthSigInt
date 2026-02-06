@@ -5,6 +5,10 @@ import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integra
 import { seedDatabase } from "./seed";
 import { z } from "zod";
 import OpenAI from "openai";
+import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan } from "./services/nmap-scanner";
+import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
+import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus } from "./services/sdr-service";
+import { getSystemCapabilities } from "./services/system-info";
 
 const updateProfileSchema = z.object({
   dataMode: z.enum(["local", "friends", "public", "osint"]).optional(),
@@ -537,6 +541,196 @@ Be specific, technical, and provide real-world context. If the MAC address is av
       } else {
         res.status(500).json({ message: "Failed to analyze device" });
       }
+    }
+  });
+
+  // ============ SYSTEM INFO ============
+  app.get("/api/system/info", isAuthenticated, async (_req: any, res) => {
+    try {
+      const capabilities = await getSystemCapabilities();
+      res.json(capabilities);
+    } catch (error) {
+      console.error("Error getting system info:", error);
+      res.status(500).json({ message: "Failed to get system info" });
+    }
+  });
+
+  // ============ NMAP SCANNING ============
+  app.get("/api/nmap/status", isAuthenticated, async (_req: any, res) => {
+    try {
+      const available = await checkNmapAvailable();
+      const version = available ? await getNmapVersion() : "Not installed";
+      res.json({ available, version });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check nmap status" });
+    }
+  });
+
+  app.post("/api/nmap/scan", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        target: z.string().min(1).max(253),
+        scanType: z.enum(["ping", "quick", "port"]).default("ping"),
+        ports: z.string().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const { target, scanType, ports } = parsed.data;
+      let result;
+
+      switch (scanType) {
+        case "ping":
+          result = await runPingScan(target);
+          break;
+        case "quick":
+          result = await runQuickScan(target);
+          break;
+        case "port":
+          result = await runPortScan(target, ports);
+          break;
+      }
+
+      if (result.error) {
+        return res.status(400).json({ message: result.error });
+      }
+
+      const userId = req.user.claims.sub;
+      await storage.logActivity(userId, "nmap_scan", `Ran ${scanType} scan on ${target} - found ${result.hosts.length} hosts`);
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error running nmap scan:", error);
+      res.status(500).json({ message: "Scan failed" });
+    }
+  });
+
+  // ============ MESHTASTIC ============
+  app.get("/api/meshtastic/status", isAuthenticated, async (_req: any, res) => {
+    try {
+      const status = getMeshtasticStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get Meshtastic status" });
+    }
+  });
+
+  app.get("/api/meshtastic/connections", isAuthenticated, async (_req: any, res) => {
+    try {
+      res.json(getConnections());
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get connections" });
+    }
+  });
+
+  app.post("/api/meshtastic/connect", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        host: z.string().min(1).max(253),
+        port: z.number().int().min(1).max(65535).default(4403),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const connection = await connectToDevice(parsed.data.host, parsed.data.port);
+      const userId = req.user.claims.sub;
+      await storage.logActivity(userId, "meshtastic_connect", `Connected to Meshtastic device at ${parsed.data.host}:${parsed.data.port}`);
+
+      res.json(connection);
+    } catch (error: any) {
+      console.error("Error connecting to Meshtastic:", error);
+      const msg = error?.message || "Connection failed";
+      if (msg.includes("private") || msg.includes("Invalid port")) {
+        return res.status(400).json({ message: msg });
+      }
+      res.status(500).json({ message: "Connection failed" });
+    }
+  });
+
+  app.post("/api/meshtastic/disconnect", isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ message: "Connection ID required" });
+      const success = disconnectDevice(id);
+      res.json({ success });
+    } catch (error) {
+      res.status(500).json({ message: "Disconnect failed" });
+    }
+  });
+
+  app.get("/api/meshtastic/nodes/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const nodes = await fetchNodes(req.params.connectionId);
+      res.json(nodes);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch nodes" });
+    }
+  });
+
+  app.post("/api/meshtastic/message", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        connectionId: z.string(),
+        text: z.string().min(1).max(228),
+        to: z.number().optional(),
+        channel: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const success = await sendMessage(parsed.data.connectionId, parsed.data.text, parsed.data.to, parsed.data.channel);
+      res.json({ success });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  // ============ SDR ============
+  app.get("/api/sdr/status", isAuthenticated, async (_req: any, res) => {
+    try {
+      const status = await getSDRStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get SDR status" });
+    }
+  });
+
+  app.get("/api/sdr/tools", isAuthenticated, async (_req: any, res) => {
+    try {
+      const tools = await checkSDRToolsAvailable();
+      res.json(tools);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check SDR tools" });
+    }
+  });
+
+  app.get("/api/sdr/devices", isAuthenticated, async (_req: any, res) => {
+    try {
+      const devices = await getSDRDevices();
+      res.json(devices);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get SDR devices" });
+    }
+  });
+
+  app.post("/api/sdr/scan", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        startFreqMHz: z.number().min(24).max(1766),
+        endFreqMHz: z.number().min(24).max(1766),
+        binSizeHz: z.number().int().min(1000).max(1000000).default(10000),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const result = await runPowerScan(parsed.data.startFreqMHz, parsed.data.endFreqMHz, parsed.data.binSizeHz);
+      const userId = req.user.claims.sub;
+      await storage.logActivity(userId, "sdr_scan", `SDR scan ${parsed.data.startFreqMHz}-${parsed.data.endFreqMHz} MHz - found ${result.signals.length} signals`);
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error running SDR scan:", error);
+      res.status(500).json({ message: "SDR scan failed" });
     }
   });
 

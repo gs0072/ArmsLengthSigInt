@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2 } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, UserCog, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2, Monitor, Server } from "lucide-react";
 import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -28,8 +28,17 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
   const { toast } = useToast();
 
   const isAdmin = userTier === "admin";
-  const hasBluetooth = true;
   const hasGeolocation = typeof navigator !== "undefined" && "geolocation" in navigator;
+
+  const { data: systemInfo } = useQuery<{
+    system: { os: string; platform: string; arch: string; hostname: string; kernel: string; cpus: number; memory: { total: number; free: number; used: number } };
+    tools: Array<{ name: string; installed: boolean; version: string; description: string }>;
+    networkInterfaces: Array<{ name: string; mac: string; addresses: string[]; internal: boolean }>;
+  }>({
+    queryKey: ["/api/system/info"],
+  });
+
+  const isToolInstalled = (name: string) => systemInfo?.tools?.find(t => t.name === name)?.installed ?? false;
 
   const { data: adminUsers = [] } = useQuery<UserProfile[]>({
     queryKey: ["/api/admin/users"],
@@ -146,10 +155,11 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     { label: "Bluetooth (BLE)", icon: Bluetooth, available: true, description: "Passive monitoring - discovers nearby BLE devices", color: "hsl(217, 91%, 60%)" },
     { label: "GPS / Geolocation", icon: Radar, available: hasGeolocation, description: hasGeolocation ? "Ready - auto-tags observations with your location" : "Not available", color: "hsl(185, 100%, 50%)" },
     { label: "Wi-Fi Scanning", icon: Wifi, available: true, description: "Passive monitoring - discovers nearby Wi-Fi networks", color: "hsl(142, 76%, 48%)" },
-    { label: "SDR Receiver", icon: Antenna, available: false, description: "Requires native desktop app with USB hardware", color: "hsl(280, 65%, 55%)" },
-    { label: "LoRa / Meshtastic", icon: Radio, available: false, description: "Requires native app with serial/USB connection", color: "hsl(25, 85%, 55%)" },
+    { label: "Network Scanner (nmap)", icon: Globe, available: isToolInstalled("nmap"), description: isToolInstalled("nmap") ? "Installed - host discovery and port scanning" : "nmap not installed", color: "hsl(160, 80%, 45%)" },
+    { label: "SDR Receiver", icon: Antenna, available: isToolInstalled("rtl_sdr"), description: isToolInstalled("rtl_sdr") ? "RTL-SDR tools installed - connect USB dongle" : "rtl-sdr tools not installed", color: "hsl(280, 65%, 55%)" },
+    { label: "LoRa / Meshtastic", icon: Radio, available: true, description: "HTTP API ready - connect to Meshtastic device on network", color: "hsl(25, 85%, 55%)" },
     { label: "RFID Reader", icon: CircuitBoard, available: false, description: "Requires native app with USB hardware", color: "hsl(45, 90%, 55%)" },
-    { label: "ADS-B Receiver", icon: Satellite, available: false, description: "Requires native app with RTL-SDR hardware", color: "hsl(0, 72%, 55%)" },
+    { label: "ADS-B Receiver", icon: Satellite, available: isToolInstalled("rtl_sdr"), description: isToolInstalled("rtl_sdr") ? "RTL-SDR available - connect ADS-B antenna" : "Requires RTL-SDR hardware", color: "hsl(0, 72%, 55%)" },
     { label: "External Sensors", icon: Thermometer, available: false, description: "Requires native app with I2C/SPI hardware", color: "hsl(320, 70%, 55%)" },
   ];
 
@@ -368,6 +378,70 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             })}
           </div>
         </div>
+
+        <GlowLine />
+
+        {systemInfo && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Monitor className="w-3.5 h-3.5 text-muted-foreground" />
+                <h4 className="text-xs font-medium">Host System</h4>
+              </div>
+              <Badge variant="outline" className="text-[8px] uppercase tracking-wider">
+                {systemInfo.system.platform}
+              </Badge>
+            </div>
+            <div className="space-y-1.5 text-[10px]">
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">OS</span>
+                <span className="text-right truncate">{systemInfo.system.os}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Arch</span>
+                <span>{systemInfo.system.arch}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">CPUs</span>
+                <span>{systemInfo.system.cpus}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Memory</span>
+                <span>{formatBytes(systemInfo.system.memory.used)} / {formatBytes(systemInfo.system.memory.total)}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">Hostname</span>
+                <span className="truncate">{systemInfo.system.hostname}</span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">Installed Tools</p>
+              <div className="flex flex-wrap gap-1">
+                {systemInfo.tools.filter(t => t.installed).map(tool => (
+                  <Badge key={tool.name} variant="outline" className="text-[8px]" style={{ color: "hsl(185, 100%, 50%)", borderColor: "hsl(185, 100%, 50%)" }}>
+                    {tool.name}
+                  </Badge>
+                ))}
+                {systemInfo.tools.filter(t => !t.installed).map(tool => (
+                  <Badge key={tool.name} variant="outline" className="text-[8px] opacity-40">
+                    {tool.name}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            {systemInfo.networkInterfaces.filter(i => !i.internal).length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">Network Interfaces</p>
+                {systemInfo.networkInterfaces.filter(i => !i.internal).map(iface => (
+                  <div key={iface.name} className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="font-medium">{iface.name}</span>
+                    <span className="text-muted-foreground truncate">{iface.addresses[0]}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <GlowLine />
 

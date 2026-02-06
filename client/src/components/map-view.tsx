@@ -102,6 +102,10 @@ export function MapView({
   const leafletRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const searchMarkerRef = useRef<any>(null);
+  const userLocationMarkerRef = useRef<any>(null);
+  const initialFitDoneRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
+  const userHasNavigatedRef = useRef(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<GeoResult[]>([]);
@@ -133,6 +137,18 @@ export function MapView({
       }).addTo(map);
 
       L.control.zoom({ position: "bottomright" }).addTo(map);
+
+      map.on("dragstart", () => {
+        if (!programmaticMoveRef.current) {
+          userHasNavigatedRef.current = true;
+        }
+      });
+
+      map.on("zoomstart", () => {
+        if (!programmaticMoveRef.current) {
+          userHasNavigatedRef.current = true;
+        }
+      });
 
       mapInstanceRef.current = map;
 
@@ -203,11 +219,14 @@ export function MapView({
       markersRef.current.push(marker);
     });
 
-    if (obsWithLocation.length > 0) {
+    if (obsWithLocation.length > 0 && !initialFitDoneRef.current && !userHasNavigatedRef.current) {
       const bounds = L.latLngBounds(
         obsWithLocation.map(o => [o.latitude!, o.longitude!])
       );
+      programmaticMoveRef.current = true;
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+      setTimeout(() => { programmaticMoveRef.current = false; }, 500);
+      initialFitDoneRef.current = true;
     }
   }, [observations, devices, selectedDeviceId, onSelectDevice]);
 
@@ -264,7 +283,13 @@ export function MapView({
       </div>
     `, { className: "dark-popup" }).openPopup();
 
-    map.flyTo([lat, lng], 14, { duration: 1.5 });
+    userHasNavigatedRef.current = false;
+    programmaticMoveRef.current = true;
+    map.flyTo([lat, lng], 15, { duration: 1.5 });
+    setTimeout(() => {
+      programmaticMoveRef.current = false;
+      userHasNavigatedRef.current = true;
+    }, 2000);
     setShowResults(false);
   }, []);
 
@@ -283,8 +308,8 @@ export function MapView({
       const map = mapInstanceRef.current;
       const { latitude, longitude } = pos.coords;
 
-      if (searchMarkerRef.current) {
-        searchMarkerRef.current.remove();
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
       }
 
       const icon = L.divIcon({
@@ -300,15 +325,20 @@ export function MapView({
         iconAnchor: [8, 8],
       });
 
-      searchMarkerRef.current = L.marker([latitude, longitude], { icon }).addTo(map);
-      searchMarkerRef.current.bindPopup(`
+      userLocationMarkerRef.current = L.marker([latitude, longitude], { icon }).addTo(map);
+      userLocationMarkerRef.current.bindPopup(`
         <div style="font-family: monospace; font-size: 11px; color: #00d4ff; background: #0a1628; padding: 8px; border-radius: 4px;">
           <div style="font-weight: bold; margin-bottom: 4px;">Your Location</div>
           <div style="color: #8899aa;">${latitude.toFixed(6)}, ${longitude.toFixed(6)}</div>
         </div>
       `, { className: "dark-popup" }).openPopup();
 
+      programmaticMoveRef.current = true;
       map.flyTo([latitude, longitude], 15, { duration: 1.5 });
+      setTimeout(() => {
+        programmaticMoveRef.current = false;
+        userHasNavigatedRef.current = true;
+      }, 2000);
     } catch {
     }
     setLocating(false);

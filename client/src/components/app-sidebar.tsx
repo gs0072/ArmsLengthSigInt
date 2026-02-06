@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard, Map, List, Search, Bell, Shield,
-  BookOpen, Settings, LogOut, Radar, Activity, Globe, Radio
+  BookOpen, Settings, LogOut, Radar, Activity, Globe, Radio, Wrench
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import type { UserProfile } from "@shared/schema";
@@ -36,6 +36,7 @@ const navItems = [
   { title: "Monitoring", path: "/monitoring", icon: Bell },
   { title: "Counter Intel", path: "/counter-intel", icon: Shield },
   { title: "Device Catalog", path: "/catalog", icon: BookOpen },
+  { title: "SIGINT Tools", path: "/tools", icon: Wrench },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 
