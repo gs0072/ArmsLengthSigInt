@@ -16,6 +16,17 @@ class AuthStorage implements IAuthStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
+    if (userData.email) {
+      const existing = await db.select().from(users).where(eq(users.email, userData.email));
+      if (existing.length > 0 && existing[0].id !== userData.id) {
+        const [updated] = await db
+          .update(users)
+          .set({ ...userData, updatedAt: new Date() })
+          .where(eq(users.email, userData.email))
+          .returning();
+        return updated;
+      }
+    }
     const [user] = await db
       .insert(users)
       .values(userData)
