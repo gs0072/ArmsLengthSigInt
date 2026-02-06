@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bell, BellOff, Plus, Search, AlertTriangle, Check, X, ExternalLink, Radar, Target } from "lucide-react";
-import type { Alert, Device } from "@shared/schema";
+import { Bell, BellOff, Plus, Search, AlertTriangle, Check, X, ExternalLink, Radar, Target, Layers } from "lucide-react";
+import type { Alert, Device, CustomSignature } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
+import { DEVICE_BROADCAST_SIGNATURES } from "@/lib/signal-utils";
 
 interface AlertHit {
   alert: Alert;
@@ -32,17 +33,50 @@ export function MonitoringPanel({ alerts, alertHits }: MonitoringPanelProps) {
   const [alertName, setAlertName] = useState("");
   const [alertType, setAlertType] = useState("device_name");
   const [searchValue, setSearchValue] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
+  const { data: customSignatures = [] } = useQuery<CustomSignature[]>({
+    queryKey: ["/api/custom-signatures"],
+  });
+
+  const categoryOptions = useMemo(() => {
+    const builtIn = Object.entries(DEVICE_BROADCAST_SIGNATURES).map(([name, sig]) => ({
+      name,
+      terms: sig.terms,
+      source: "built-in" as const,
+    }));
+    const custom = customSignatures.map(sig => ({
+      name: sig.name,
+      terms: sig.terms || [],
+      source: "custom" as const,
+    }));
+    return [...builtIn, ...custom];
+  }, [customSignatures]);
+
+  const isCategory = alertType === "device_category";
+
   const createAlert = useMutation({
     mutationFn: async () => {
+      let criteria: Record<string, unknown>;
+      let description: string;
+
+      if (isCategory && selectedCategory) {
+        const cat = categoryOptions.find(c => c.name === selectedCategory);
+        criteria = { type: "catalog_broadcast_match", terms: cat?.terms || [selectedCategory], category: selectedCategory };
+        description = `Monitor for category: ${selectedCategory}`;
+      } else {
+        criteria = { searchTerm: searchValue, type: alertType };
+        description = `Monitor for: ${searchValue}`;
+      }
+
       const res = await apiRequest("POST", "/api/alerts", {
         name: alertName,
         alertType,
-        description: `Monitor for: ${searchValue}`,
-        criteria: { searchTerm: searchValue, type: alertType },
+        description,
+        criteria,
       });
       return res.json();
     },
@@ -51,6 +85,7 @@ export function MonitoringPanel({ alerts, alertHits }: MonitoringPanelProps) {
       setShowForm(false);
       setAlertName("");
       setSearchValue("");
+      setSelectedCategory("");
       toast({ title: "Alert created", description: "Monitoring is now active" });
     },
   });
@@ -157,11 +192,14 @@ export function MonitoringPanel({ alerts, alertHits }: MonitoringPanelProps) {
                 className="text-xs"
                 data-testid="input-alert-name"
               />
-              <Select value={alertType} onValueChange={setAlertType}>
+              <Select value={alertType} onValueChange={(v) => { setAlertType(v); setSelectedCategory(""); setSearchValue(""); }}>
                 <SelectTrigger className="text-xs" data-testid="select-alert-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="device_category">
+                    <span className="flex items-center gap-1.5"><Layers className="w-3 h-3" /> Device Category</span>
+                  </SelectItem>
                   <SelectItem value="device_name">Device Name</SelectItem>
                   <SelectItem value="mac_address">MAC Address</SelectItem>
                   <SelectItem value="signal_type">Signal Type</SelectItem>
@@ -173,18 +211,40 @@ export function MonitoringPanel({ alerts, alertHits }: MonitoringPanelProps) {
                   <SelectItem value="following">Following Detection</SelectItem>
                 </SelectContent>
               </Select>
-              <Input
-                placeholder="Search value or pattern..."
-                value={searchValue}
-                onChange={e => setSearchValue(e.target.value)}
-                className="text-xs font-mono"
-                data-testid="input-alert-value"
-              />
+              {isCategory ? (
+                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                  <SelectTrigger className="text-xs" data-testid="select-alert-category">
+                    <SelectValue placeholder="Select a device category..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <ScrollArea className="max-h-[240px]">
+                      {categoryOptions.map(cat => (
+                        <SelectItem key={cat.name} value={cat.name}>
+                          <span className="flex items-center gap-1.5">
+                            {cat.name}
+                            {cat.source === "custom" && (
+                              <Badge variant="outline" className="text-[7px] ml-1 no-default-hover-elevate no-default-active-elevate">custom</Badge>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </ScrollArea>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  placeholder="Search value or pattern..."
+                  value={searchValue}
+                  onChange={e => setSearchValue(e.target.value)}
+                  className="text-xs font-mono"
+                  data-testid="input-alert-value"
+                />
+              )}
               <Button
                 size="sm"
                 className="w-full"
                 onClick={() => createAlert.mutate()}
-                disabled={!alertName || !searchValue || createAlert.isPending}
+                disabled={!alertName || (isCategory ? !selectedCategory : !searchValue) || createAlert.isPending}
                 data-testid="button-create-alert"
               >
                 {createAlert.isPending ? "Creating..." : "Create Alert"}
@@ -221,9 +281,16 @@ export function MonitoringPanel({ alerts, alertHits }: MonitoringPanelProps) {
                               )}
                             </div>
                             <p className="text-[10px] text-muted-foreground mt-0.5">{alert.description}</p>
-                            <Badge variant="outline" className="mt-1 text-[9px]">
-                              {alert.alertType.replace(/_/g, " ")}
-                            </Badge>
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                              <Badge variant="outline" className="text-[9px]">
+                                {alert.alertType.replace(/_/g, " ")}
+                              </Badge>
+                              {(alert.criteria as any)?.category && (
+                                <Badge variant="secondary" className="text-[9px]">
+                                  {(alert.criteria as any).category}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <Button
                             size="icon"

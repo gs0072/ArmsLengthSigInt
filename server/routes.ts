@@ -1322,6 +1322,12 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
               .filter(Boolean).map(f => f!.toLowerCase());
             return terms.some(term => fields.some(field => field.includes(term.toLowerCase())));
           });
+          if (criteria.category) {
+            const catDevices = allDevices.filter(d => d.deviceType && d.deviceType.toLowerCase() === (criteria.category as string).toLowerCase());
+            for (const d of catDevices) {
+              if (!matchedDevices.some(m => m.id === d.id)) matchedDevices.push(d);
+            }
+          }
         } else if (criteria.searchTerm) {
           const searchTerm = (criteria.searchTerm as string).toLowerCase();
           matchedDevices = allDevices.filter(device => {
