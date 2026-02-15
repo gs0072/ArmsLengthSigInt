@@ -7,7 +7,7 @@ import { z } from "zod";
 import OpenAI from "openai";
 import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan } from "./services/nmap-scanner";
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
-import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus } from "./services/sdr-service";
+import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, testRTLTCPConnection, scanViaRTLTCP, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
 import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
 import { matchDeviceToSignature, DEVICE_BROADCAST_SIGNATURES_SERVER } from "./services/signature-matcher";
@@ -870,24 +870,87 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     }
   });
 
+  app.get("/api/sdr/presets", isAuthenticated, async (_req: any, res) => {
+    res.json(FREQUENCY_PRESETS);
+  });
+
   app.post("/api/sdr/scan", isAuthenticated, async (req: any, res) => {
     try {
       const schema = z.object({
         startFreqMHz: z.number().min(24).max(1766),
         endFreqMHz: z.number().min(24).max(1766),
         binSizeHz: z.number().int().min(1000).max(1000000).default(10000),
+        mode: z.enum(["server", "rtl_tcp", "simulation"]).default("server"),
+        rtlTcpHost: z.string().optional(),
+        rtlTcpPort: z.number().int().min(1).max(65535).optional(),
       });
       const parsed = schema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
 
-      const result = await runPowerScan(parsed.data.startFreqMHz, parsed.data.endFreqMHz, parsed.data.binSizeHz);
       const userId = req.user.claims.sub;
-      await storage.logActivity(userId, "sdr_scan", `SDR scan ${parsed.data.startFreqMHz}-${parsed.data.endFreqMHz} MHz - found ${result.signals.length} signals`);
+      let result;
 
+      if (parsed.data.mode === "simulation") {
+        const startTime = Date.now();
+        const signals = generateRealisticSpectrum(parsed.data.startFreqMHz, parsed.data.endFreqMHz);
+        result = {
+          startFreq: parsed.data.startFreqMHz * 1e6,
+          endFreq: parsed.data.endFreqMHz * 1e6,
+          startTime,
+          endTime: Date.now(),
+          signals,
+          rawOutput: "Simulation mode",
+          error: null,
+          source: "simulation" as const,
+        };
+      } else if (parsed.data.mode === "rtl_tcp" && parsed.data.rtlTcpHost && parsed.data.rtlTcpPort) {
+        result = await scanViaRTLTCP(
+          parsed.data.rtlTcpHost,
+          parsed.data.rtlTcpPort,
+          parsed.data.startFreqMHz,
+          parsed.data.endFreqMHz,
+          parsed.data.binSizeHz
+        );
+      } else {
+        result = await runPowerScan(parsed.data.startFreqMHz, parsed.data.endFreqMHz, parsed.data.binSizeHz);
+      }
+
+      await storage.logActivity(userId, "sdr_scan", `SDR ${parsed.data.mode} scan ${parsed.data.startFreqMHz}-${parsed.data.endFreqMHz} MHz - found ${result.signals.length} signals`);
       res.json(result);
     } catch (error) {
       console.error("Error running SDR scan:", error);
       res.status(500).json({ message: "SDR scan failed" });
+    }
+  });
+
+  app.post("/api/sdr/test-connection", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        host: z.string().min(1),
+        port: z.number().int().min(1).max(65535),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
+      const result = await testRTLTCPConnection(parsed.data.host, parsed.data.port);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Connection test failed" });
+    }
+  });
+
+  app.post("/api/sdr/waterfall", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        startFreqMHz: z.number().min(24).max(1766),
+        endFreqMHz: z.number().min(24).max(1766),
+        numBins: z.number().int().min(64).max(2048).default(512),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
+      const frame = generateWaterfallFrame(parsed.data.startFreqMHz, parsed.data.endFreqMHz, parsed.data.numBins);
+      res.json({ frame, timestamp: Date.now() });
+    } catch (error) {
+      res.status(500).json({ message: "Waterfall generation failed" });
     }
   });
 

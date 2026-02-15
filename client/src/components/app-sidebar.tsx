@@ -37,6 +37,7 @@ const navItems = [
   { title: "Counter Intel", path: "/counter-intel", icon: Shield },
   { title: "Device Catalog", path: "/catalog", icon: BookOpen },
   { title: "SIGINT Tools", path: "/tools", icon: Wrench },
+  { title: "SDR Analyzer", path: "/sdr", icon: Radio },
   { title: "Link Analysis", path: "/link-analysis", icon: GitBranch },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
