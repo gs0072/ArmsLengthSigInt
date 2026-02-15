@@ -715,18 +715,49 @@ export default function SDRPage() {
               <Card className="p-3 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-semibold">
                   <Terminal className="w-3.5 h-3.5" style={{ color: "hsl(142, 76%, 48%)" }} />
-                  Setup Instructions
+                  Setup Guide
                 </div>
-                <div className="text-[9px] text-muted-foreground space-y-1 font-mono">
-                  <p className="font-sans text-[10px] font-medium text-foreground/80">macOS:</p>
-                  <p>$ brew install librtlsdr</p>
-                  <p>$ rtl_tcp -a 0.0.0.0 -p 1234</p>
-                  <p className="font-sans text-[10px] font-medium text-foreground/80 mt-2">Linux:</p>
-                  <p>$ sudo apt install rtl-sdr</p>
-                  <p>$ rtl_tcp -a 0.0.0.0 -p 1234</p>
-                  <p className="font-sans text-[10px] font-medium text-foreground/80 mt-2">Windows:</p>
-                  <p>Install Zadig + rtl-sdr drivers</p>
-                  <p>Run rtl_tcp.exe -a 0.0.0.0</p>
+                <div className="text-[10px] text-muted-foreground space-y-2">
+                  <div>
+                    <p className="font-semibold text-foreground/80 mb-0.5">Step 1: Install RTL-SDR tools</p>
+                    <div className="font-mono text-[9px] space-y-0.5 pl-2 border-l border-border">
+                      <p className="text-foreground/60">macOS:</p>
+                      <p>$ brew install librtlsdr</p>
+                      <p className="text-foreground/60 mt-1">Linux:</p>
+                      <p>$ sudo apt install rtl-sdr</p>
+                      <p className="text-foreground/60 mt-1">Windows:</p>
+                      <p>Install Zadig + rtl-sdr drivers</p>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground/80 mb-0.5">Step 2: Plug in your RTL-SDR dongle and start rtl_tcp</p>
+                    <div className="font-mono text-[9px] pl-2 border-l border-border">
+                      <p>$ rtl_tcp -a 0.0.0.0 -p 1234</p>
+                      <p className="text-foreground/60 mt-0.5">You should see "Found 1 device(s)" in the output.</p>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground/80 mb-0.5">Step 3: Make it reachable from the internet</p>
+                    <p className="text-foreground/60">This app runs in the cloud, so it needs a way to reach your local machine. Use one of:</p>
+                    <div className="font-mono text-[9px] space-y-1 pl-2 border-l border-border mt-1">
+                      <div>
+                        <p className="text-foreground/70 font-sans font-medium">Option A: ngrok (easiest)</p>
+                        <p>$ ngrok tcp 1234</p>
+                        <p className="text-foreground/60">Copy the forwarding address (e.g. 0.tcp.ngrok.io:12345) and paste it as Host:Port above.</p>
+                      </div>
+                      <div>
+                        <p className="text-foreground/70 font-sans font-medium">Option B: Port forward</p>
+                        <p className="text-foreground/60">Forward port 1234 on your router to your local IP, then enter your public IP above.</p>
+                      </div>
+                      <div>
+                        <p className="text-foreground/70 font-sans font-medium">Option C: Tailscale / VPN</p>
+                        <p className="text-foreground/60">Use your Tailscale IP as the host if both machines are on the same tailnet.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-muted/50 rounded p-1.5 text-[9px]">
+                    <p className="text-foreground/70 font-medium">Do NOT use localhost or 127.0.0.1 -- those refer to this cloud server, not your computer.</p>
+                  </div>
                 </div>
               </Card>
             )}
