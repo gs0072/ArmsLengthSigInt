@@ -74,16 +74,6 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
   });
   const hasGeolocation = typeof navigator !== "undefined" && "geolocation" in navigator;
 
-  const { data: systemInfo } = useQuery<{
-    system: { os: string; platform: string; arch: string; hostname: string; kernel: string; cpus: number; memory: { total: number; free: number; used: number } };
-    tools: Array<{ name: string; installed: boolean; version: string; description: string }>;
-    networkInterfaces: Array<{ name: string; mac: string; addresses: string[]; internal: boolean }>;
-  }>({
-    queryKey: ["/api/system/info"],
-  });
-
-  const isToolInstalled = (name: string) => systemInfo?.tools?.find(t => t.name === name)?.installed ?? false;
-
   const clearDataMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("POST", "/api/clear-data");
@@ -177,17 +167,6 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
     admin: "10 GB storage, full platform access, user management, system configuration",
   };
 
-  const capabilities = [
-    { label: "Bluetooth (BLE)", icon: Bluetooth, available: true, description: "Passive monitoring - discovers nearby BLE devices", color: "hsl(217, 91%, 60%)" },
-    { label: "GPS / Geolocation", icon: Radar, available: hasGeolocation, description: hasGeolocation ? "Ready - auto-tags observations with your location" : "Not available", color: "hsl(185, 100%, 50%)" },
-    { label: "Wi-Fi Scanning", icon: Wifi, available: true, description: "Passive monitoring - discovers nearby Wi-Fi networks", color: "hsl(142, 76%, 48%)" },
-    { label: "Network Scanner (nmap)", icon: Globe, available: isToolInstalled("nmap"), description: isToolInstalled("nmap") ? "Installed - host discovery and port scanning" : "nmap not installed", color: "hsl(160, 80%, 45%)" },
-    { label: "SDR Receiver", icon: Antenna, available: isToolInstalled("rtl_sdr"), description: isToolInstalled("rtl_sdr") ? "RTL-SDR tools installed - connect USB dongle" : "rtl-sdr tools not installed", color: "hsl(280, 65%, 55%)" },
-    { label: "LoRa / Meshtastic", icon: Radio, available: true, description: "HTTP API ready - connect to Meshtastic device on network", color: "hsl(25, 85%, 55%)" },
-    { label: "RFID Reader", icon: CircuitBoard, available: false, description: "Requires native app with USB hardware", color: "hsl(45, 90%, 55%)" },
-    { label: "ADS-B Receiver", icon: Satellite, available: isToolInstalled("rtl_sdr"), description: isToolInstalled("rtl_sdr") ? "RTL-SDR available - connect ADS-B antenna" : "Requires RTL-SDR hardware", color: "hsl(0, 72%, 55%)" },
-    { label: "External Sensors", icon: Thermometer, available: false, description: "Requires native app with I2C/SPI hardware", color: "hsl(320, 70%, 55%)" },
-  ];
 
   return (
     <Card className="flex flex-col h-full overflow-visible">
@@ -515,116 +494,48 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
         <GlowLine />
 
         <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Radar className="w-3.5 h-3.5 text-muted-foreground" />
-              <h4 className="text-xs font-medium">Browser Capabilities</h4>
-            </div>
-            <Badge variant="outline" className="text-[8px] uppercase tracking-wider">
-              {capabilities.filter(c => c.available).length} / {capabilities.length} Available
-            </Badge>
+          <div className="flex items-center gap-2">
+            <Radar className="w-3.5 h-3.5 text-muted-foreground" />
+            <h4 className="text-xs font-medium">How Hardware Collection Works</h4>
           </div>
-          <div className="space-y-2">
-            {capabilities.map((cap) => {
-              const IconComp = cap.icon;
-              return (
-                <div
-                  key={cap.label}
-                  className={`flex items-center justify-between gap-3 p-2 rounded-md border transition-colors ${
-                    cap.available
-                      ? "border-border/50 bg-muted/10"
-                      : "border-border/20 bg-transparent opacity-60"
-                  }`}
-                  data-testid={`capability-${cap.label.toLowerCase().replace(/[^a-z]/g, "-")}`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div
-                      className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: cap.available ? cap.color : undefined, opacity: cap.available ? 0.15 : 0.05 }}
-                    >
-                      <IconComp className="w-3.5 h-3.5" style={{ color: cap.available ? cap.color : undefined }} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-medium truncate">{cap.label}</span>
-                      </div>
-                      <p className="text-[9px] text-muted-foreground truncate">{cap.description}</p>
-                    </div>
-                  </div>
-                  {cap.available ? (
-                    <Check className="w-4 h-4 text-green-500 shrink-0" />
-                  ) : (
-                    <X className="w-4 h-4 text-muted-foreground/40 shrink-0" />
-                  )}
-                </div>
-              );
-            })}
+          <div className="p-2.5 rounded-md border border-border/30 bg-muted/10 space-y-2">
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              This is a cloud app. To collect real signals from WiFi adapters, Bluetooth dongles, RTL-SDR receivers, etc., you run a small Python script on your own computer where the hardware is plugged in.
+            </p>
+            <div className="flex flex-col gap-1.5 text-[10px] text-muted-foreground">
+              <div className="flex items-start gap-2">
+                <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">1</Badge>
+                <span>Your hardware (WiFi adapter, RTL-SDR, etc.) is on your local machine</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">2</Badge>
+                <span>The collector script scans using your hardware</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">3</Badge>
+                <span>Results are securely pushed to this cloud app via API</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">4</Badge>
+                <span>The Dashboard shows your live data in real time</span>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Generate an API key and download scripts from the Hardware Collectors section below.
+            </p>
           </div>
-        </div>
-
-        <GlowLine />
-
-        {systemInfo && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Monitor className="w-3.5 h-3.5 text-muted-foreground" />
-                <h4 className="text-xs font-medium">Host System</h4>
-              </div>
-              <Badge variant="outline" className="text-[8px] uppercase tracking-wider">
-                {systemInfo.system.platform}
-              </Badge>
+          <div className="flex items-center justify-between gap-2 p-2 rounded-md border border-border/30">
+            <div className="flex items-center gap-2 min-w-0">
+              <Radar className="w-3 h-3 text-muted-foreground shrink-0" />
+              <span className="text-[10px] text-muted-foreground">Browser GPS</span>
             </div>
-            <div className="space-y-1.5 text-[10px]">
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">OS</span>
-                <span className="text-right truncate">{systemInfo.system.os}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Arch</span>
-                <span>{systemInfo.system.arch}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">CPUs</span>
-                <span>{systemInfo.system.cpus}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Memory</span>
-                <span>{formatBytes(systemInfo.system.memory.used)} / {formatBytes(systemInfo.system.memory.total)}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">Hostname</span>
-                <span className="truncate">{systemInfo.system.hostname}</span>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">Installed Tools</p>
-              <div className="flex flex-wrap gap-1">
-                {systemInfo.tools.filter(t => t.installed).map(tool => (
-                  <Badge key={tool.name} variant="outline" className="text-[8px]" style={{ color: "hsl(185, 100%, 50%)", borderColor: "hsl(185, 100%, 50%)" }}>
-                    {tool.name}
-                  </Badge>
-                ))}
-                {systemInfo.tools.filter(t => !t.installed).map(tool => (
-                  <Badge key={tool.name} variant="outline" className="text-[8px] opacity-40">
-                    {tool.name}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            {systemInfo.networkInterfaces.filter(i => !i.internal).length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">Network Interfaces</p>
-                {systemInfo.networkInterfaces.filter(i => !i.internal).map(iface => (
-                  <div key={iface.name} className="flex items-center justify-between gap-2 text-[10px]">
-                    <span className="font-medium">{iface.name}</span>
-                    <span className="text-muted-foreground truncate">{iface.addresses[0]}</span>
-                  </div>
-                ))}
-              </div>
+            {hasGeolocation ? (
+              <Badge variant="outline" className="text-[8px]" style={{ color: "hsl(142, 76%, 48%)", borderColor: "hsl(142, 76%, 48%)" }}>Supported</Badge>
+            ) : (
+              <Badge variant="outline" className="text-[8px] opacity-50">Not Available</Badge>
             )}
           </div>
-        )}
+        </div>
 
         <GlowLine />
 
