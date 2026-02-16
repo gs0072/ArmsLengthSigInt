@@ -1853,11 +1853,83 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
       }
 
       await storage.updateCollectorApiKeyLastUsed(keyRecord.id);
+      await storage.logActivity(userId, "collector_push", `Hardware collector pushed ${parsed.data.devices.length} devices (${created} new, ${updated} updated) via key "${keyRecord.name}"`, req.ip);
 
       res.json({ processed: parsed.data.devices.length, created, updated });
     } catch (error) {
       console.error("Error processing collector push:", error);
       res.status(500).json({ message: "Failed to process push data" });
+    }
+  });
+
+  // ============ COLLECTOR SCRIPT DOWNLOADS ============
+  const COLLECTOR_SCRIPTS: Record<string, { filename: string; path: string }> = {
+    wifi: { filename: "sigint_collector.py", path: "collector/sigint_collector.py" },
+    bluetooth: { filename: "sigint_bluetooth_collector.py", path: "collector/sigint_bluetooth_collector.py" },
+    multi: { filename: "sigint_multi_collector.py", path: "collector/sigint_multi_collector.py" },
+  };
+
+  app.get("/api/collector/scripts/:type", isAuthenticated, async (req: any, res) => {
+    try {
+      const scriptType = req.params.type;
+      const script = COLLECTOR_SCRIPTS[scriptType];
+      if (!script) {
+        return res.status(404).json({ message: "Unknown script type. Available: wifi, bluetooth, multi" });
+      }
+      const fs = await import("fs");
+      const path = await import("path");
+      const scriptPath = path.join(process.cwd(), script.path);
+      if (!fs.existsSync(scriptPath)) {
+        return res.status(404).json({ message: "Script file not found on server." });
+      }
+      res.setHeader("Content-Type", "text/x-python");
+      res.setHeader("Content-Disposition", `attachment; filename="${script.filename}"`);
+      const content = fs.readFileSync(scriptPath, "utf-8");
+      res.send(content);
+    } catch (error) {
+      console.error("Error serving collector script:", error);
+      res.status(500).json({ message: "Failed to serve script" });
+    }
+  });
+
+  app.get("/api/collector/scripts", isAuthenticated, async (_req: any, res) => {
+    res.json({
+      scripts: Object.entries(COLLECTOR_SCRIPTS).map(([type, info]) => ({
+        type,
+        filename: info.filename,
+        downloadUrl: `/api/collector/scripts/${type}`,
+      })),
+    });
+  });
+
+  // ============ COLLECTOR STATUS (real hardware activity) ============
+  app.get("/api/collector/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const keys = await storage.getCollectorApiKeys(userId);
+      const activeKeys = keys.filter(k => k.isActive);
+      const recentlyUsedKeys = keys.filter(k => {
+        if (!k.lastUsedAt) return false;
+        const elapsed = Date.now() - new Date(k.lastUsedAt).getTime();
+        return elapsed < 5 * 60 * 1000;
+      });
+
+      const recentActivity = await storage.getActivityLog(userId, 20);
+      const collectorPushes = recentActivity.filter(a => a.action === "collector_push");
+      const lastPush = collectorPushes.length > 0 ? collectorPushes[0] : null;
+
+      res.json({
+        hasApiKeys: keys.length > 0,
+        activeKeyCount: activeKeys.length,
+        totalKeys: keys.length,
+        recentlyActiveKeys: recentlyUsedKeys.length,
+        lastPushAt: lastPush?.timestamp || null,
+        recentPushCount: collectorPushes.length,
+        isReceivingHardwareData: recentlyUsedKeys.length > 0,
+      });
+    } catch (error) {
+      console.error("Error fetching collector status:", error);
+      res.status(500).json({ message: "Failed to fetch collector status" });
     }
   });
 

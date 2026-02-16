@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Key, Copy, Trash2, Plus, Loader2, AlertTriangle } from "lucide-react";
+import { Key, Copy, Trash2, Plus, Loader2, AlertTriangle, Download, Wifi, Bluetooth, Radio, Terminal, ExternalLink, HardDrive } from "lucide-react";
 
 interface CollectorKey {
   id: number;
@@ -18,6 +18,36 @@ interface CollectorKey {
   lastUsedAt: string | null;
   createdAt: string;
 }
+
+const COLLECTOR_SCRIPTS = [
+  {
+    type: "wifi",
+    label: "WiFi Collector",
+    filename: "sigint_collector.py",
+    description: "Scans nearby WiFi networks using your WiFi adapter (built-in or Alfa AC-1000, etc.)",
+    icon: Wifi,
+    platforms: ["Windows", "macOS", "Linux"],
+    requirements: "Python 3.8+, requests library",
+  },
+  {
+    type: "bluetooth",
+    label: "Bluetooth Collector",
+    filename: "sigint_bluetooth_collector.py",
+    description: "Scans nearby Bluetooth Classic and BLE devices using your Bluetooth adapter",
+    icon: Bluetooth,
+    platforms: ["Windows", "macOS", "Linux"],
+    requirements: "Python 3.8+, requests, bleak (optional for BLE)",
+  },
+  {
+    type: "multi",
+    label: "Multi-Protocol Collector",
+    filename: "sigint_multi_collector.py",
+    description: "Combined WiFi + Bluetooth scanning in a single script for maximum coverage",
+    icon: Radio,
+    platforms: ["Windows", "macOS", "Linux"],
+    requirements: "Python 3.8+, requests, bleak (optional for BLE)",
+  },
+];
 
 export default function SettingsPage() {
   const { data: profile } = useQuery<UserProfile>({ queryKey: ["/api/profile"] });
@@ -78,6 +108,24 @@ export default function SettingsPage() {
     }
   };
 
+  const handleDownloadScript = async (type: string, filename: string) => {
+    try {
+      const res = await apiRequest("GET", `/api/collector/scripts/${type}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "Downloaded", description: `${filename} saved to your Downloads folder.` });
+    } catch {
+      toast({ title: "Error", description: "Failed to download script.", variant: "destructive" });
+    }
+  };
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "Never";
     return new Date(dateStr).toLocaleDateString("en-US", {
@@ -86,6 +134,8 @@ export default function SettingsPage() {
       year: "numeric",
     });
   };
+
+  const appUrl = window.location.origin;
 
   return (
     <div className="flex flex-col h-full p-3 overflow-auto">
@@ -107,7 +157,7 @@ export default function SettingsPage() {
             <div>
               <h3 className="text-sm font-semibold">Collector API Keys</h3>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                Generate API keys to connect external collector scripts that scan real hardware.
+                Generate API keys to authenticate your hardware collector scripts with this app.
               </p>
             </div>
           </CardHeader>
@@ -141,7 +191,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-3.5 h-3.5 text-primary shrink-0" />
                   <p className="text-[10px] text-primary font-medium">
-                    Save this key now — you won't be able to see it again.
+                    Save this key now. You will not be able to see it again.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -175,7 +225,7 @@ export default function SettingsPage() {
             ) : collectorKeys.length === 0 ? (
               <div className="text-center py-4">
                 <p className="text-[10px] text-muted-foreground">No API keys generated yet.</p>
-                <p className="text-[10px] text-muted-foreground/70 mt-1">Create a key to connect your collector scripts.</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-1">Create a key above to connect your collector scripts.</p>
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -222,19 +272,118 @@ export default function SettingsPage() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
 
-            <div className="space-y-2 pt-2 border-t border-border/30">
-              <div className="flex items-center gap-2">
-                <Key className="w-3 h-3 text-muted-foreground" />
-                <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Quick Start</h4>
-              </div>
-              <div className="rounded-md bg-muted/20 p-2.5 font-mono text-[10px] text-muted-foreground leading-relaxed select-all">
-                <div>pip install requests</div>
-                <div className="mt-1">python sigint_collector.py --key YOUR_KEY --url https://your-app.replit.app</div>
-              </div>
-              <p className="text-[9px] text-muted-foreground/60">
-                Replace YOUR_KEY with the generated API key and update the URL to match your deployment.
+        <Card className="overflow-visible">
+          <CardHeader className="flex flex-row items-center gap-2 pb-2 px-3 pt-3">
+            <Download className="w-4 h-4 text-primary" />
+            <div>
+              <h3 className="text-sm font-semibold">Hardware Collector Scripts</h3>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Download Python scripts to run on your computer with real hardware (WiFi adapters, Bluetooth dongles, etc.)
               </p>
+            </div>
+          </CardHeader>
+          <CardContent className="px-3 pb-3 space-y-3">
+            {COLLECTOR_SCRIPTS.map((script) => {
+              const SIcon = script.icon;
+              return (
+                <div
+                  key={script.type}
+                  className="flex items-start gap-3 p-3 rounded-md border border-border/50 bg-muted/5"
+                  data-testid={`script-card-${script.type}`}
+                >
+                  <SIcon className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold">{script.label}</span>
+                      {script.platforms.map(p => (
+                        <Badge key={p} variant="outline" className="text-[7px]">{p}</Badge>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">{script.description}</p>
+                    <p className="text-[9px] text-muted-foreground/70 mt-0.5">
+                      Requires: {script.requirements}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDownloadScript(script.type, script.filename)}
+                    data-testid={`button-download-${script.type}`}
+                  >
+                    <Download className="w-3 h-3 mr-1" />
+                    Download
+                  </Button>
+                </div>
+              );
+            })}
+
+            <div className="space-y-3 pt-3 border-t border-border/30">
+              <div className="flex items-center gap-2">
+                <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
+                <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Setup Instructions</h4>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-start gap-2">
+                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">1</Badge>
+                  <p className="text-[10px] text-muted-foreground">
+                    Generate a Collector API Key above (if you have not already).
+                  </p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">2</Badge>
+                  <p className="text-[10px] text-muted-foreground">
+                    Download a collector script and save it to your computer.
+                  </p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">3</Badge>
+                  <div className="flex-1">
+                    <p className="text-[10px] text-muted-foreground">
+                      Install Python dependencies on your machine:
+                    </p>
+                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all">
+                      pip install requests bleak
+                    </code>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">4</Badge>
+                  <div className="flex-1">
+                    <p className="text-[10px] text-muted-foreground">
+                      Run the script with your API key and this app's URL:
+                    </p>
+                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1.5 rounded-md select-all leading-relaxed">
+                      python sigint_collector.py --key YOUR_API_KEY --url {appUrl}
+                    </code>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">5</Badge>
+                  <p className="text-[10px] text-muted-foreground">
+                    Optional: Add GPS coordinates for location tagging with --lat and --lng flags.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-md border border-border/30 bg-muted/10">
+                <p className="text-[10px] text-muted-foreground font-medium mb-1.5">
+                  Full command example:
+                </p>
+                <code className="block text-[9px] font-mono text-muted-foreground leading-relaxed select-all break-all">
+                  python sigint_multi_collector.py --key YOUR_KEY --url {appUrl} --lat 38.8977 --lng -77.0365 --interval 15
+                </code>
+              </div>
+
+              <div className="flex items-start gap-2 p-2 rounded-md border border-yellow-500/20 bg-yellow-500/5">
+                <AlertTriangle className="w-3 h-3 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
+                <p className="text-[9px] text-muted-foreground">
+                  The collector scripts run on YOUR machine, not on this server. They scan your local wireless environment using your hardware and securely push the results to this cloud app via the API.
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>
