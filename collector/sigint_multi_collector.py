@@ -7,17 +7,26 @@ system's hardware adapters and pushes everything to SIGINT Hub.
 
 Combines WiFi + Bluetooth scanning into a single collector.
 
+Supported Platforms:
+  - macOS 12+ (Monterey, Ventura, Sonoma, Sequoia)
+    WiFi: CoreWLAN framework (pip3 install pyobjc-framework-CoreWLAN)
+    Bluetooth: bleak (pip3 install bleak)
+    Note: Location Services required for WiFi, Bluetooth permission for BT
+  - Windows 10/11
+    WiFi: netsh (built-in)
+    Bluetooth: bleak (pip3 install bleak)
+  - Linux
+    WiFi: nmcli (NetworkManager)
+    Bluetooth: hcitool/bluetoothctl or bleak
+
 Requirements:
   - Python 3.8+
-  - pip install requests
-  - WiFi adapter (built-in or external like Alfa AC-1000)
-  - Bluetooth adapter (built-in or USB dongle)
-  - Linux: nmcli + hcitool/bluetoothctl (or pip install bleak)
-  - macOS: airport utility + bleak (pip install bleak)
-  - Windows: netsh + bleak (pip install bleak)
+  - pip3 install requests bleak
+  - macOS WiFi: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation
 
 Usage:
-  python sigint_multi_collector.py --key YOUR_KEY --url https://your-app.replit.app
+  python3 sigint_multi_collector.py --key YOUR_KEY --url https://your-app.replit.app
+  python3 sigint_multi_collector.py --setup    # Check dependencies first
 """
 
 import subprocess
@@ -28,13 +37,14 @@ import sys
 import os
 import platform
 import argparse
+import asyncio
 from datetime import datetime
 
 try:
     import requests
 except ImportError:
     print("ERROR: 'requests' library not found.")
-    print("Install it with: pip install requests")
+    print("Install it with: pip3 install requests")
     sys.exit(1)
 
 API_KEY = os.environ.get("SIGINT_API_KEY", "YOUR_API_KEY_HERE")
@@ -57,16 +67,94 @@ OUI_DB = {
     "48:A6:B8": "Sonos", "44:07:0B": "Ring", "2C:AA:8E": "Wyze",
     "DC:56:E7": "Apple", "F0:D4:15": "Apple", "D4:F5:47": "Bose",
     "04:52:C7": "Bose", "7C:D9:F4": "JBL", "88:C6:26": "Tile",
-    "74:75:48": "Amazon", "F4:F5:D8": "Google",
+    "74:75:48": "Amazon", "F4:F5:D8": "Google", "8C:DE:52": "Beats",
+    "2C:41:A1": "Bose", "28:6C:07": "Xiaomi", "00:18:09": "Garmin",
 }
 
+def is_uuid_address(addr):
+    """Check if an address is a macOS-style UUID rather than a MAC address."""
+    return len(addr) > 17 or "-" in addr
+
 def lookup_manufacturer(mac):
+    if is_uuid_address(mac):
+        return "Unknown (macOS UUID)"
     prefix = mac[:8].upper()
     return OUI_DB.get(prefix, "Unknown")
 
 # ============================================================
 # WiFi Scanning
 # ============================================================
+
+def scan_wifi_macos_corewlan():
+    """Scan WiFi networks using macOS CoreWLAN framework."""
+    try:
+        import objc
+        import CoreWLAN
+    except ImportError:
+        return None
+
+    try:
+        wifi_client = CoreWLAN.CWWiFiClient.sharedWiFiClient()
+        interface = wifi_client.interface()
+        if not interface:
+            return []
+
+        networks, error = interface.scanForNetworksWithName_includeHidden_error_(None, True, None)
+        if error:
+            print(f"  [!] CoreWLAN error: {error}")
+            return []
+
+        results = []
+        for network in networks:
+            bssid = network.bssid()
+            if not bssid:
+                continue
+            channel_obj = network.wlanChannel()
+            channel = channel_obj.channelNumber() if channel_obj else 0
+            results.append({
+                "ssid": network.ssid() or "Hidden Network",
+                "bssid": bssid.upper(),
+                "rssi": network.rssiValue(),
+                "channel": channel,
+                "auth": "Unknown",
+            })
+        return results
+    except Exception as e:
+        print(f"  [!] CoreWLAN error: {e}")
+        return []
+
+def scan_wifi_macos_airport():
+    """Scan WiFi using legacy airport utility."""
+    try:
+        airport = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+        if not os.path.exists(airport):
+            return None
+        result = subprocess.run([airport, "-s"], capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return None
+        networks = []
+        for line in result.stdout.strip().splitlines()[1:]:
+            m = re.match(r"\s*(.+?)\s+([0-9a-f:]{17})\s+(-?\d+)\s+(\d+)\s+\S+\s+\S+\s+(\S+)", line, re.IGNORECASE)
+            if m:
+                networks.append({
+                    "ssid": m.group(1).strip(), "bssid": m.group(2).upper(),
+                    "rssi": int(m.group(3)), "channel": int(m.group(4)),
+                    "auth": m.group(5),
+                })
+        return networks if networks else None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+def scan_wifi_macos():
+    """Scan WiFi on macOS using best available method."""
+    networks = scan_wifi_macos_corewlan()
+    if networks is not None:
+        return networks
+    networks = scan_wifi_macos_airport()
+    if networks is not None:
+        return networks
+    print("  [!] No WiFi scan method available. Install: pip3 install pyobjc-framework-CoreWLAN")
+    return []
 
 def scan_wifi_windows():
     try:
@@ -138,24 +226,6 @@ def scan_wifi_linux():
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
 
-def scan_wifi_macos():
-    try:
-        airport = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
-        result = subprocess.run([airport, "-s"], capture_output=True, text=True, timeout=30)
-        if result.returncode != 0: return []
-        networks = []
-        for line in result.stdout.strip().splitlines()[1:]:
-            m = re.match(r"\s*(.+?)\s+([0-9a-f:]{17})\s+(-?\d+)\s+(\d+)\s+\S+\s+\S+\s+(\S+)", line, re.IGNORECASE)
-            if m:
-                networks.append({
-                    "ssid": m.group(1).strip(), "bssid": m.group(2).upper(),
-                    "rssi": int(m.group(3)), "channel": int(m.group(4)),
-                    "auth": m.group(5),
-                })
-        return networks
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
-
 def scan_wifi():
     system = platform.system()
     if system == "Windows": return scan_wifi_windows()
@@ -217,19 +287,44 @@ def scan_bt_linux():
 
 def scan_bt_bleak():
     try:
-        import asyncio
         from bleak import BleakScanner
+    except ImportError:
+        return None
+
+    try:
         async def do_scan():
             found = await BleakScanner.discover(timeout=8.0)
             return [{"mac": d.address.upper(), "name": d.name or "Unknown BLE", "type": "ble", "rssi": d.rssi or -80} for d in found]
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(do_scan())
-        loop.close()
-        return result
-    except ImportError: return None
+
+        if platform.system() == "Darwin":
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, do_scan())
+                    return future.result(timeout=15)
+            else:
+                return asyncio.run(do_scan())
+        else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(do_scan())
+            finally:
+                loop.close()
+            return result
+    except ImportError:
+        return None
     except Exception as e:
         print(f"  [!] BLE error: {e}")
+        if "not turned on" in str(e).lower() or "powered off" in str(e).lower():
+            print("      Turn on Bluetooth in System Settings")
+        elif "not authorized" in str(e).lower() or "permission" in str(e).lower():
+            print("      Grant Bluetooth permission to Terminal/iTerm2")
         return []
 
 def scan_bluetooth():
@@ -292,6 +387,115 @@ def push_to_server(devices):
     except requests.exceptions.Timeout: return False, {"error": "Timeout."}
     except Exception as e: return False, {"error": str(e)}
 
+def check_setup():
+    """Run comprehensive setup check for all platforms."""
+    system = platform.system()
+    print(f"\n  Platform: {system} {platform.release()} ({platform.machine()})")
+    print(f"  Python:   {sys.executable} ({platform.python_version()})")
+    print()
+
+    all_ok = True
+
+    try:
+        import requests as r
+        print(f"  [+] requests: {r.__version__}")
+    except ImportError:
+        print("  [-] requests: Not installed (pip3 install requests)")
+        all_ok = False
+
+    print()
+
+    if system == "Darwin":
+        print("  === macOS WiFi ===")
+        has_corewlan = False
+        try:
+            import CoreWLAN
+            has_corewlan = True
+            print("    [+] CoreWLAN: Available (modern WiFi scanning)")
+        except ImportError:
+            print("    [-] CoreWLAN: Not installed")
+            print("        Fix: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation")
+
+        airport = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+        if os.path.exists(airport):
+            print("    [+] airport: Available (legacy fallback)")
+        else:
+            print("    [-] airport: Removed (macOS Sonoma 14.4+)")
+            if not has_corewlan:
+                print("        You NEED CoreWLAN for WiFi scanning!")
+                all_ok = False
+
+        has_corelocation = False
+        try:
+            import CoreLocation
+            has_corelocation = True
+            print("    [+] CoreLocation: Available")
+        except ImportError:
+            print("    [-] CoreLocation: Not installed")
+            print("        Fix: pip3 install pyobjc-framework-CoreLocation")
+
+        print()
+        print("  === macOS Bluetooth ===")
+        try:
+            import bleak
+            print(f"    [+] bleak: {getattr(bleak, '__version__', 'unknown')}")
+        except ImportError:
+            print("    [-] bleak: Not installed (pip3 install bleak)")
+            all_ok = False
+
+        print()
+        print("  === macOS Permissions ===")
+        print("    [i] WiFi scanning requires Location Services for Terminal/iTerm2")
+        print("        System Settings > Privacy & Security > Location Services")
+        print("    [i] Bluetooth scanning requires Bluetooth permission")
+        print("        System Settings > Privacy & Security > Bluetooth")
+        print("    [i] Using system Python (/usr/bin/python3) gives best compatibility")
+
+    elif system == "Windows":
+        print("  === Windows WiFi ===")
+        try:
+            result = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                print("    [+] netsh WiFi: Available")
+            else:
+                print("    [-] netsh WiFi: Error")
+        except FileNotFoundError:
+            print("    [-] netsh: Not found")
+
+        print()
+        print("  === Windows Bluetooth ===")
+        try:
+            import bleak
+            print(f"    [+] bleak: {getattr(bleak, '__version__', 'unknown')}")
+        except ImportError:
+            print("    [-] bleak: Not installed (pip3 install bleak)")
+            all_ok = False
+
+    elif system == "Linux":
+        print("  === Linux WiFi ===")
+        try:
+            subprocess.run(["nmcli", "--version"], capture_output=True, text=True, timeout=5)
+            print("    [+] nmcli: Available")
+        except FileNotFoundError:
+            print("    [-] nmcli: Not found (install NetworkManager)")
+            all_ok = False
+
+        print()
+        print("  === Linux Bluetooth ===")
+        try:
+            subprocess.run(["hcitool", "--help"], capture_output=True, timeout=5)
+            print("    [+] hcitool: Available")
+        except FileNotFoundError:
+            print("    [-] hcitool: Not found (install bluez)")
+        try:
+            import bleak
+            print(f"    [+] bleak: {getattr(bleak, '__version__', 'unknown')} (fallback)")
+        except ImportError:
+            print("    [i] bleak: Not installed (optional: pip3 install bleak)")
+
+    print()
+    return all_ok
+
 def print_banner():
     print("""
  ____  ___ ____ ___ _   _ _____   _   _ _   _ ____
@@ -314,6 +518,7 @@ def main():
     parser.add_argument("--wifi-only", action="store_true", help="WiFi scanning only")
     parser.add_argument("--bt-only", action="store_true", help="Bluetooth scanning only")
     parser.add_argument("--once", action="store_true", help="Run one scan and exit")
+    parser.add_argument("--setup", action="store_true", help="Check system setup and dependencies")
     args = parser.parse_args()
 
     global API_KEY, APP_URL, LATITUDE, LONGITUDE
@@ -323,6 +528,21 @@ def main():
     if args.lng is not None: LONGITUDE = args.lng
 
     print_banner()
+
+    if args.setup:
+        ok = check_setup()
+        print()
+        if ok:
+            print("  Setup looks good! Run without --setup to start scanning.")
+        else:
+            print("  Some issues found. Fix them and try again.")
+        print()
+        print("  Quick install for macOS:")
+        print("    pip3 install requests bleak pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation")
+        print()
+        print("  Quick install for Windows/Linux:")
+        print("    pip3 install requests bleak")
+        sys.exit(0 if ok else 1)
 
     if API_KEY == "YOUR_API_KEY_HERE" or not API_KEY:
         print("[!] ERROR: No API key. Use --key or set SIGINT_API_KEY")
@@ -336,6 +556,7 @@ def main():
     scan_bt_enabled = not args.wifi_only
 
     print(f"  System:    {system} ({platform.release()})")
+    print(f"  Python:    {sys.executable}")
     print(f"  Server:    {APP_URL}")
     print(f"  Interval:  {args.interval}s")
     print(f"  WiFi:      {'Enabled' if scan_wifi_enabled else 'Disabled'}")
@@ -343,6 +564,12 @@ def main():
     if LATITUDE and LONGITUDE:
         print(f"  GPS:       {LATITUDE}, {LONGITUDE}")
     print()
+
+    if system == "Darwin":
+        print("  [i] macOS detected. Run with --setup to check dependencies.")
+        if scan_bt_enabled:
+            print("  [i] Bluetooth addresses on macOS appear as UUIDs (Apple privacy)")
+        print()
 
     print("[*] Testing connection...")
     ok, result = push_to_server([])
@@ -374,7 +601,10 @@ def main():
                 bt_devs = format_bt_devices(bt_devs_raw)
                 print(f"  Bluetooth: {len(bt_devs_raw)} devices")
                 for d in bt_devs_raw[:3]:
-                    print(f"    {d.get('name', '?')[:20]:<20} {d.get('mac', '?')}  {d.get('rssi', '?')}dBm")
+                    mac = d.get("mac", "?")
+                    if is_uuid_address(mac):
+                        mac = mac[:8] + "..."
+                    print(f"    {d.get('name', '?')[:20]:<20} {mac:<20}  {d.get('rssi', '?')}dBm")
                 all_devices.extend(bt_devs)
 
             if all_devices:
@@ -386,6 +616,8 @@ def main():
                     print(f"  Push failed: {result.get('error', 'Unknown')}")
             else:
                 print("  No signals found.")
+                if system == "Darwin":
+                    print("  Tip: Run with --setup to check your configuration")
 
             if args.once: break
             print(f"  Next scan in {args.interval}s... (Ctrl+C to stop)\n")

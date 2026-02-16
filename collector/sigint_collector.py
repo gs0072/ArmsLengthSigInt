@@ -1,20 +1,29 @@
 #!/usr/bin/env python3
 """
-SIGINT Hub - WiFi Collector for Windows
+SIGINT Hub - WiFi Collector
 ========================================
-Scans nearby WiFi networks using your WiFi adapter (e.g. Alfa AC-1000)
-and pushes discovered devices to your SIGINT Hub cloud instance.
+Scans nearby WiFi networks using your WiFi adapter and pushes discovered
+devices to your SIGINT Hub cloud instance.
+
+Supported Platforms:
+  - macOS 12+ (Monterey, Ventura, Sonoma, Sequoia)
+    Uses CoreWLAN framework (requires pyobjc: pip3 install pyobjc-framework-CoreWLAN)
+    Falls back to airport utility on older macOS versions
+    Note: Location Services must be enabled for Terminal/iTerm2
+  - Windows 10/11 (uses netsh)
+  - Linux (uses nmcli / iwlist)
 
 Requirements:
-  - Windows 10/11
   - Python 3.8+
-  - requests library: pip install requests
-  - A WiFi adapter (built-in or external like Alfa AC-1000)
+  - pip3 install requests
+  - macOS only: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation
+  - On macOS, using system Python (/usr/bin/python3) is recommended for best
+    CoreWLAN compatibility
 
 Usage:
   1. Generate a Collector API Key in SIGINT Hub Settings
-  2. Edit the CONFIG section below with your API key and app URL
-  3. Run: python sigint_collector.py
+  2. Run: python3 sigint_collector.py --key YOUR_KEY --url https://your-app.replit.app
+  3. On macOS: Grant Location Services permission when prompted
 
 The script will continuously scan and push results every 15 seconds.
 Press Ctrl+C to stop.
@@ -34,18 +43,14 @@ try:
     import requests
 except ImportError:
     print("ERROR: 'requests' library not found.")
-    print("Install it with: pip install requests")
+    print("Install it with: pip3 install requests")
     sys.exit(1)
 
-# ============================================================
-# CONFIG - Edit these values
-# ============================================================
 API_KEY = os.environ.get("SIGINT_API_KEY", "YOUR_API_KEY_HERE")
 APP_URL = os.environ.get("SIGINT_APP_URL", "https://your-app.replit.app")
-SCAN_INTERVAL = 15  # seconds between scans
-LATITUDE = None     # set your latitude or leave None for no GPS
-LONGITUDE = None    # set your longitude or leave None for no GPS
-# ============================================================
+SCAN_INTERVAL = 15
+LATITUDE = None
+LONGITUDE = None
 
 OUI_DB = {
     "00:50:F2": "Microsoft", "00:0C:E7": "MediaTek", "00:E0:4C": "Realtek",
@@ -64,6 +69,104 @@ OUI_DB = {
 def lookup_manufacturer(bssid):
     prefix = bssid[:8].upper()
     return OUI_DB.get(prefix, "Unknown")
+
+def scan_wifi_macos_corewlan():
+    """Scan WiFi networks using macOS CoreWLAN framework (modern method)."""
+    try:
+        import objc
+        import CoreWLAN
+    except ImportError:
+        return None
+
+    try:
+        wifi_client = CoreWLAN.CWWiFiClient.sharedWiFiClient()
+        interface = wifi_client.interface()
+        if not interface:
+            print("  [!] No WiFi interface found via CoreWLAN")
+            return []
+
+        networks, error = interface.scanForNetworksWithName_includeHidden_error_(None, True, None)
+        if error:
+            print(f"  [!] CoreWLAN scan error: {error}")
+            return []
+
+        results = []
+        for network in networks:
+            ssid = network.ssid()
+            bssid = network.bssid()
+            if not bssid:
+                continue
+
+            channel_obj = network.wlanChannel()
+            channel = channel_obj.channelNumber() if channel_obj else 0
+
+            security_str = "Open"
+            try:
+                from CoreWLAN import kCWSecurityWPA2Personal, kCWSecurityWPA2Enterprise, kCWSecurityWPA3Personal, kCWSecurityWPAPersonal
+                sec_mode = network.security() if hasattr(network, 'security') else None
+            except ImportError:
+                sec_mode = None
+
+            results.append({
+                "ssid": ssid or "Hidden Network",
+                "bssid": bssid.upper(),
+                "rssi": network.rssiValue(),
+                "signal_pct": max(0, min(100, (network.rssiValue() + 100) * 2)),
+                "channel": channel,
+                "auth": security_str,
+                "encryption": security_str,
+            })
+        return results
+    except Exception as e:
+        print(f"  [!] CoreWLAN error: {e}")
+        return []
+
+def scan_wifi_macos_airport():
+    """Scan WiFi networks using macOS airport utility (legacy, removed in Sonoma 14.4+)."""
+    try:
+        airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+        if not os.path.exists(airport_path):
+            return None
+
+        result = subprocess.run(
+            [airport_path, "-s"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return None
+
+        networks = []
+        lines = result.stdout.strip().splitlines()
+        for line in lines[1:]:
+            match = re.match(r"\s*(.+?)\s+([0-9a-f:]{17})\s+(-?\d+)\s+(\d+)\s+\S+\s+\S+\s+(\S+)", line, re.IGNORECASE)
+            if match:
+                networks.append({
+                    "ssid": match.group(1).strip(),
+                    "bssid": match.group(2).upper(),
+                    "rssi": int(match.group(3)),
+                    "signal_pct": max(0, min(100, (int(match.group(3)) + 100) * 2)),
+                    "channel": int(match.group(4)),
+                    "auth": match.group(5),
+                    "encryption": match.group(5),
+                })
+        return networks if networks else None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+def scan_wifi_macos():
+    """Scan WiFi on macOS using best available method."""
+    networks = scan_wifi_macos_corewlan()
+    if networks is not None:
+        return networks
+
+    networks = scan_wifi_macos_airport()
+    if networks is not None:
+        return networks
+
+    print("  [!] No WiFi scanning method available on this Mac.")
+    print("      Install CoreWLAN support: pip3 install pyobjc-framework-CoreWLAN")
+    print("      Or use an older macOS version with the airport utility.")
+    return []
 
 def scan_wifi_windows():
     """Scan WiFi networks using Windows netsh command."""
@@ -181,36 +284,6 @@ def scan_wifi_linux():
         print("  [!] nmcli not found. Install NetworkManager.")
         return []
 
-def scan_wifi_macos():
-    """Scan WiFi networks using macOS airport utility."""
-    try:
-        airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
-        result = subprocess.run(
-            [airport_path, "-s"],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode != 0:
-            return []
-
-        networks = []
-        lines = result.stdout.strip().splitlines()
-        for line in lines[1:]:
-            match = re.match(r"\s*(.+?)\s+([0-9a-f:]{17})\s+(-?\d+)\s+(\d+)\s+\S+\s+\S+\s+(\S+)", line, re.IGNORECASE)
-            if match:
-                networks.append({
-                    "ssid": match.group(1).strip(),
-                    "bssid": match.group(2).upper(),
-                    "rssi": int(match.group(3)),
-                    "signal_pct": max(0, min(100, (int(match.group(3)) + 100) * 2)),
-                    "channel": int(match.group(4)),
-                    "auth": match.group(5),
-                    "encryption": match.group(5),
-                })
-        return networks
-    except FileNotFoundError:
-        print("  [!] airport utility not found.")
-        return []
-
 def channel_to_freq(channel):
     if 1 <= channel <= 14:
         if channel == 14:
@@ -296,6 +369,101 @@ def push_to_server(devices):
     except Exception as e:
         return False, {"error": str(e)}
 
+def check_macos_setup():
+    """Check macOS-specific requirements and provide guidance."""
+    print("  [macOS Setup Check]")
+
+    airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+    has_airport = os.path.exists(airport_path)
+
+    has_corewlan = False
+    try:
+        import CoreWLAN
+        has_corewlan = True
+    except ImportError:
+        pass
+
+    has_corelocation = False
+    try:
+        import CoreLocation
+        has_corelocation = True
+    except ImportError:
+        pass
+
+    if has_corewlan:
+        print("    [+] CoreWLAN: Available (modern WiFi scanning)")
+    else:
+        print("    [-] CoreWLAN: Not installed")
+        print("        Fix: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation")
+
+    if has_airport:
+        print("    [+] airport: Available (legacy WiFi scanning)")
+    else:
+        print("    [-] airport: Removed (macOS Sonoma 14.4+)")
+        if not has_corewlan:
+            print("        You NEED CoreWLAN. Run: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation")
+
+    if has_corelocation:
+        print("    [+] CoreLocation: Available")
+    else:
+        print("    [-] CoreLocation: Not installed (needed for SSID/BSSID access)")
+        print("        Fix: pip3 install pyobjc-framework-CoreLocation")
+
+    print()
+    print("    [i] Location Services must be enabled for Terminal/iTerm2")
+    print("        Go to: System Settings > Privacy & Security > Location Services")
+    print("        Enable it for your terminal app")
+    print()
+
+    if not has_corewlan and not has_airport:
+        print("    [!] CRITICAL: No WiFi scanning method available!")
+        print("        Run: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation")
+        print("        Tip: Using /usr/bin/python3 (system Python) gives best compatibility")
+        return False
+    return True
+
+def check_setup():
+    """Run platform-specific setup checks."""
+    system = platform.system()
+    print(f"\n  Platform: {system} {platform.release()} ({platform.machine()})")
+    print(f"  Python:   {sys.executable} ({platform.python_version()})")
+    print()
+
+    if system == "Darwin":
+        ok = check_macos_setup()
+    elif system == "Windows":
+        print("  [Windows Setup Check]")
+        try:
+            result = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and "connected" in result.stdout.lower():
+                print("    [+] WiFi adapter: Connected")
+            else:
+                print("    [-] WiFi adapter: Not connected or not found")
+        except FileNotFoundError:
+            print("    [-] netsh: Not found (need Windows with WiFi)")
+        ok = True
+    elif system == "Linux":
+        print("  [Linux Setup Check]")
+        try:
+            subprocess.run(["nmcli", "--version"], capture_output=True, text=True, timeout=5)
+            print("    [+] nmcli: Available")
+        except FileNotFoundError:
+            print("    [-] nmcli: Not found. Install NetworkManager")
+        ok = True
+    else:
+        print(f"  [!] Unsupported OS: {system}")
+        ok = False
+
+    print()
+    try:
+        import requests as r
+        print(f"  [+] requests: {r.__version__}")
+    except ImportError:
+        print("  [-] requests: Not installed (pip3 install requests)")
+        ok = False
+
+    return ok
+
 def print_banner():
     print("""
  ____  ___ ____ ___ _   _ _____   _   _ _   _ ____
@@ -304,8 +472,8 @@ def print_banner():
  ___) | |_| || | | || \\ | | |   |  _  | |_| | |__) |
 |____/ \\___/|___| |___|_| \\_| |_|   |_| |_|\\___/|____/
 
-  WiFi Collector - Real Hardware Scanner
-  ========================================
+  WiFi Collector - Cross-Platform Hardware Scanner
+  ==================================================
 """)
 
 def main():
@@ -316,6 +484,7 @@ def main():
     parser.add_argument("--lat", type=float, help="Your latitude for GPS tagging")
     parser.add_argument("--lng", type=float, help="Your longitude for GPS tagging")
     parser.add_argument("--once", action="store_true", help="Run one scan and exit")
+    parser.add_argument("--setup", action="store_true", help="Check system setup and dependencies")
     args = parser.parse_args()
 
     global API_KEY, APP_URL, LATITUDE, LONGITUDE
@@ -331,6 +500,14 @@ def main():
 
     print_banner()
 
+    if args.setup:
+        ok = check_setup()
+        if ok:
+            print("  Setup looks good! Run without --setup to start scanning.")
+        else:
+            print("  Some issues found. Fix them and try again.")
+        sys.exit(0 if ok else 1)
+
     if API_KEY == "YOUR_API_KEY_HERE" or not API_KEY:
         print("[!] ERROR: No API key configured.")
         print("    Set SIGINT_API_KEY environment variable or use --key flag")
@@ -345,6 +522,7 @@ def main():
 
     system = platform.system()
     print(f"  System:    {system} ({platform.release()})")
+    print(f"  Python:    {sys.executable}")
     print(f"  Server:    {APP_URL}")
     print(f"  Interval:  {args.interval}s")
     if LATITUDE and LONGITUDE:
@@ -357,6 +535,9 @@ def main():
         scan_fn = scan_wifi_windows
     elif system == "Darwin":
         scan_fn = scan_wifi_macos
+        print("  [i] macOS: Will try CoreWLAN first, then airport utility")
+        print("  [i] Tip: Run with --setup to check your configuration")
+        print()
     elif system == "Linux":
         scan_fn = scan_wifi_linux
     else:
@@ -406,7 +587,13 @@ def main():
                 else:
                     print(f"  Push failed: {result.get('error', 'Unknown')}")
             else:
-                print("  No networks found. Is WiFi adapter active?")
+                if system == "Darwin":
+                    print("  No networks found. Possible causes:")
+                    print("    - Location Services not enabled for Terminal")
+                    print("    - WiFi adapter not active")
+                    print("    - Run with --setup to diagnose")
+                else:
+                    print("  No networks found. Is WiFi adapter active?")
 
             if args.once:
                 break

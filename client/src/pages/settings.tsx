@@ -27,7 +27,7 @@ const COLLECTOR_SCRIPTS = [
     description: "Scans nearby WiFi networks using your WiFi adapter (built-in or Alfa AC-1000, etc.)",
     icon: Wifi,
     platforms: ["Windows", "macOS", "Linux"],
-    requirements: "Python 3.8+, requests library",
+    requirements: "Python 3.8+, requests (macOS: + pyobjc-framework-CoreWLAN)",
   },
   {
     type: "bluetooth",
@@ -36,7 +36,7 @@ const COLLECTOR_SCRIPTS = [
     description: "Scans nearby Bluetooth Classic and BLE devices using your Bluetooth adapter",
     icon: Bluetooth,
     platforms: ["Windows", "macOS", "Linux"],
-    requirements: "Python 3.8+, requests, bleak (optional for BLE)",
+    requirements: "Python 3.8+, requests, bleak",
   },
   {
     type: "multi",
@@ -45,7 +45,7 @@ const COLLECTOR_SCRIPTS = [
     description: "Combined WiFi + Bluetooth scanning in a single script for maximum coverage",
     icon: Radio,
     platforms: ["Windows", "macOS", "Linux"],
-    requirements: "Python 3.8+, requests, bleak (optional for BLE)",
+    requirements: "Python 3.8+, requests, bleak (macOS: + pyobjc)",
   },
 ];
 
@@ -346,23 +346,37 @@ export default function SettingsPage() {
                       Install Python dependencies on your machine:
                     </p>
                     <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all">
-                      pip install requests bleak
+                      pip3 install requests bleak
                     </code>
+                    <p className="text-[9px] text-muted-foreground/70 mt-1">
+                      macOS additional: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-start gap-2">
                   <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">4</Badge>
                   <div className="flex-1">
                     <p className="text-[10px] text-muted-foreground">
-                      Run the script with your API key and this app's URL:
+                      Check your setup (optional but recommended):
                     </p>
-                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1.5 rounded-md select-all leading-relaxed">
-                      python sigint_collector.py --key YOUR_API_KEY --url {appUrl}
+                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all">
+                      python3 sigint_collector.py --setup
                     </code>
                   </div>
                 </div>
                 <div className="flex items-start gap-2">
                   <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">5</Badge>
+                  <div className="flex-1">
+                    <p className="text-[10px] text-muted-foreground">
+                      Run the script with your API key and this app's URL:
+                    </p>
+                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1.5 rounded-md select-all leading-relaxed">
+                      python3 sigint_collector.py --key YOUR_API_KEY --url {appUrl}
+                    </code>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">6</Badge>
                   <p className="text-[10px] text-muted-foreground">
                     Optional: Add GPS coordinates for location tagging with --lat and --lng flags.
                   </p>
@@ -374,14 +388,32 @@ export default function SettingsPage() {
                   Full command example:
                 </p>
                 <code className="block text-[9px] font-mono text-muted-foreground leading-relaxed select-all break-all">
-                  python sigint_multi_collector.py --key YOUR_KEY --url {appUrl} --lat 38.8977 --lng -77.0365 --interval 15
+                  python3 sigint_multi_collector.py --key YOUR_KEY --url {appUrl} --lat 38.8977 --lng -77.0365 --interval 15
                 </code>
+              </div>
+
+              <div className="p-2.5 rounded-md border border-border/30 bg-muted/10 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <p className="text-[10px] text-muted-foreground font-medium">macOS Setup Guide</p>
+                </div>
+                <div className="text-[9px] text-muted-foreground space-y-1">
+                  <p>Apple removed the airport WiFi scanning tool in macOS Sonoma 14.4+. The scripts now use Apple's CoreWLAN framework instead.</p>
+                  <p className="font-medium">Quick install for macOS:</p>
+                  <code className="block mt-0.5 text-[9px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all break-all">
+                    pip3 install requests bleak pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation
+                  </code>
+                  <p className="mt-1">After installing, enable these macOS permissions:</p>
+                  <p>- Location Services for Terminal: System Settings &gt; Privacy &gt; Location Services</p>
+                  <p>- Bluetooth for Terminal: System Settings &gt; Privacy &gt; Bluetooth</p>
+                  <p className="mt-1">Tip: Using /usr/bin/python3 (system Python) gives the best compatibility with Apple frameworks.</p>
+                </div>
               </div>
 
               <div className="flex items-start gap-2 p-2 rounded-md border border-yellow-500/20 bg-yellow-500/5">
                 <AlertTriangle className="w-3 h-3 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
                 <p className="text-[9px] text-muted-foreground">
-                  The collector scripts run on YOUR machine, not on this server. They scan your local wireless environment using your hardware and securely push the results to this cloud app via the API.
+                  The collector scripts run on YOUR machine, not on this server. They scan your local wireless environment using your hardware and securely push the results to this cloud app via the API. Run any script with --setup to diagnose issues.
                 </p>
               </div>
             </div>

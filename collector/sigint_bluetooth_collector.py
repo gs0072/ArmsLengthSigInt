@@ -5,16 +5,23 @@ SIGINT Hub - Bluetooth Collector
 Scans nearby Bluetooth and BLE devices using your system's Bluetooth adapter
 and pushes discovered devices to your SIGINT Hub cloud instance.
 
+Supported Platforms:
+  - macOS 12+ (uses bleak library with CoreBluetooth)
+    Note: macOS uses UUID-style addresses instead of MAC addresses (Apple privacy)
+    Devices are still tracked consistently across scans on the same machine
+  - Windows 10/11 (uses bleak)
+  - Linux (uses hcitool/bluetoothctl, falls back to bleak)
+
 Requirements:
   - Python 3.8+
-  - requests library: pip install requests
-  - Linux: bluez (hcitool, bluetoothctl) or bleak (pip install bleak)
-  - macOS: bleak (pip install bleak)
-  - Windows: bleak (pip install bleak)
+  - pip3 install requests bleak
+  - macOS: Bluetooth must be enabled in System Settings
+  - macOS: Terminal/iTerm2 needs Bluetooth permission
+    (System Settings > Privacy & Security > Bluetooth)
 
 Usage:
   1. Generate a Collector API Key in SIGINT Hub Settings
-  2. Run: python sigint_bluetooth_collector.py --key YOUR_KEY --url https://your-app.replit.app
+  2. Run: python3 sigint_bluetooth_collector.py --key YOUR_KEY --url https://your-app.replit.app
 """
 
 import subprocess
@@ -25,13 +32,14 @@ import sys
 import os
 import platform
 import argparse
+import asyncio
 from datetime import datetime
 
 try:
     import requests
 except ImportError:
     print("ERROR: 'requests' library not found.")
-    print("Install it with: pip install requests")
+    print("Install it with: pip3 install requests")
     sys.exit(1)
 
 API_KEY = os.environ.get("SIGINT_API_KEY", "YOUR_API_KEY_HERE")
@@ -54,7 +62,13 @@ BT_OUI_DB = {
     "00:16:4E": "Nokia", "88:C6:26": "Tile", "E4:17:D8": "Tile",
 }
 
+def is_uuid_address(addr):
+    """Check if an address is a macOS-style UUID rather than a MAC address."""
+    return len(addr) > 17 or "-" in addr
+
 def lookup_manufacturer(mac):
+    if is_uuid_address(mac):
+        return "Unknown (macOS UUID)"
     prefix = mac[:8].upper()
     return BT_OUI_DB.get(prefix, "Unknown")
 
@@ -123,30 +137,55 @@ def scan_bluetooth_linux_hcitool():
 
 def scan_bluetooth_bleak():
     try:
-        import asyncio
         from bleak import BleakScanner
+    except ImportError:
+        return None
 
+    try:
         async def do_scan():
             found = await BleakScanner.discover(timeout=8.0)
             results = []
             for d in found:
+                addr = d.address.upper()
                 results.append({
-                    "mac": d.address.upper(),
+                    "mac": addr,
                     "name": d.name or "Unknown BLE Device",
                     "type": "ble",
                     "rssi": d.rssi if d.rssi else -80,
+                    "is_uuid": is_uuid_address(addr),
                 })
             return results
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        devices = loop.run_until_complete(do_scan())
-        loop.close()
-        return devices
+        if platform.system() == "Darwin":
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, do_scan())
+                    return future.result(timeout=15)
+            else:
+                return asyncio.run(do_scan())
+        else:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                devices = loop.run_until_complete(do_scan())
+            finally:
+                loop.close()
+            return devices
     except ImportError:
         return None
     except Exception as e:
         print(f"  [!] BLE scan error: {e}")
+        if "not turned on" in str(e).lower() or "powered off" in str(e).lower():
+            print("      Turn on Bluetooth in System Settings")
+        elif "not authorized" in str(e).lower() or "permission" in str(e).lower():
+            print("      Grant Bluetooth permission to Terminal/iTerm2:")
+            print("      System Settings > Privacy & Security > Bluetooth")
         return []
 
 def scan_bluetooth():
@@ -162,7 +201,7 @@ def scan_bluetooth():
         bleak_devices = scan_bluetooth_bleak()
         if bleak_devices is not None:
             return bleak_devices
-        print(f"  [!] Install 'bleak' for Bluetooth scanning: pip install bleak")
+        print(f"  [!] Install 'bleak' for Bluetooth scanning: pip3 install bleak")
         return []
 
 def classify_bt_device(name, manufacturer):
@@ -242,6 +281,81 @@ def push_to_server(devices):
     except Exception as e:
         return False, {"error": str(e)}
 
+def check_macos_setup():
+    """Check macOS Bluetooth requirements."""
+    print("  [macOS Bluetooth Setup Check]")
+
+    has_bleak = False
+    bleak_version = "?"
+    try:
+        import bleak
+        has_bleak = True
+        bleak_version = getattr(bleak, "__version__", "unknown")
+    except ImportError:
+        pass
+
+    if has_bleak:
+        print(f"    [+] bleak: {bleak_version}")
+    else:
+        print("    [-] bleak: Not installed")
+        print("        Fix: pip3 install bleak")
+
+    print()
+    print("    [i] macOS Bluetooth notes:")
+    print("        - macOS uses UUID addresses instead of MAC addresses (Apple privacy)")
+    print("          Devices are still tracked consistently on the same machine")
+    print("        - Bluetooth must be enabled: System Settings > Bluetooth")
+    print("        - Terminal needs Bluetooth permission:")
+    print("          System Settings > Privacy & Security > Bluetooth > Terminal")
+    print()
+    return has_bleak
+
+def check_setup():
+    """Run platform-specific setup checks."""
+    system = platform.system()
+    print(f"\n  Platform: {system} {platform.release()} ({platform.machine()})")
+    print(f"  Python:   {sys.executable} ({platform.python_version()})")
+    print()
+
+    if system == "Darwin":
+        ok = check_macos_setup()
+    elif system == "Windows":
+        print("  [Windows Bluetooth Setup Check]")
+        has_bleak = False
+        try:
+            import bleak
+            has_bleak = True
+            print(f"    [+] bleak: {getattr(bleak, '__version__', 'unknown')}")
+        except ImportError:
+            print("    [-] bleak: Not installed (pip3 install bleak)")
+        ok = has_bleak
+    elif system == "Linux":
+        print("  [Linux Bluetooth Setup Check]")
+        try:
+            subprocess.run(["hcitool", "--help"], capture_output=True, timeout=5)
+            print("    [+] hcitool: Available")
+        except FileNotFoundError:
+            print("    [-] hcitool: Not found (install bluez)")
+        try:
+            import bleak
+            print(f"    [+] bleak: {getattr(bleak, '__version__', 'unknown')} (fallback)")
+        except ImportError:
+            print("    [i] bleak: Not installed (optional fallback: pip3 install bleak)")
+        ok = True
+    else:
+        print(f"  [!] Unsupported OS: {system}")
+        ok = False
+
+    print()
+    try:
+        import requests as r
+        print(f"  [+] requests: {r.__version__}")
+    except ImportError:
+        print("  [-] requests: Not installed (pip3 install requests)")
+        ok = False
+
+    return ok
+
 def print_banner():
     print("""
  ____  ___ ____ ___ _   _ _____   _   _ _   _ ____
@@ -250,8 +364,8 @@ def print_banner():
  ___) | |_| || | | || \\ | | |   |  _  | |_| | |__) |
 |____/ \\___/|___| |___|_| \\_| |_|   |_| |_|\\___/|____/
 
-  Bluetooth Collector - Real Hardware Scanner
-  =============================================
+  Bluetooth Collector - Cross-Platform Hardware Scanner
+  =======================================================
 """)
 
 def main():
@@ -262,6 +376,7 @@ def main():
     parser.add_argument("--lat", type=float, help="Your latitude")
     parser.add_argument("--lng", type=float, help="Your longitude")
     parser.add_argument("--once", action="store_true", help="Run one scan and exit")
+    parser.add_argument("--setup", action="store_true", help="Check system setup and dependencies")
     args = parser.parse_args()
 
     global API_KEY, APP_URL, LATITUDE, LONGITUDE
@@ -271,6 +386,14 @@ def main():
     if args.lng is not None: LONGITUDE = args.lng
 
     print_banner()
+
+    if args.setup:
+        ok = check_setup()
+        if ok:
+            print("  Setup looks good! Run without --setup to start scanning.")
+        else:
+            print("  Some issues found. Fix them and try again.")
+        sys.exit(0 if ok else 1)
 
     if API_KEY == "YOUR_API_KEY_HERE" or not API_KEY:
         print("[!] ERROR: No API key configured.")
@@ -283,11 +406,19 @@ def main():
 
     system = platform.system()
     print(f"  System:    {system} ({platform.release()})")
+    print(f"  Python:    {sys.executable}")
     print(f"  Server:    {APP_URL}")
     print(f"  Interval:  {args.interval}s")
     if LATITUDE and LONGITUDE:
         print(f"  GPS:       {LATITUDE}, {LONGITUDE}")
     print()
+
+    if system == "Darwin":
+        uuid_count = 0
+        print("  [i] macOS: Bluetooth addresses will appear as UUIDs (Apple privacy)")
+        print("      Devices are still tracked consistently on this machine")
+        print("  [i] Tip: Run with --setup to check your configuration")
+        print()
 
     print("[*] Testing connection...")
     ok, result = push_to_server([])
@@ -313,9 +444,11 @@ def main():
                 for d in bt_devices[:5]:
                     name = (d.get("name", "?"))[:25]
                     mac = d.get("mac", "?")
+                    if is_uuid_address(mac):
+                        mac = mac[:8] + "..."
                     rssi = d.get("rssi", "?")
                     bt_type = d.get("type", "?")
-                    print(f"    {name:<25} {mac}  {rssi}dBm  {bt_type}")
+                    print(f"    {name:<25} {mac:<20} {rssi}dBm  {bt_type}")
                 if len(bt_devices) > 5:
                     print(f"    ... and {len(bt_devices) - 5} more")
 
@@ -329,7 +462,14 @@ def main():
                 else:
                     print(f"  Push failed: {result.get('error', 'Unknown')}")
             else:
-                print("  No devices found. Is Bluetooth adapter enabled?")
+                if system == "Darwin":
+                    print("  No devices found. Possible causes:")
+                    print("    - Bluetooth is turned off (System Settings > Bluetooth)")
+                    print("    - Terminal lacks Bluetooth permission")
+                    print("    - No BLE devices advertising nearby")
+                    print("    - Run with --setup to diagnose")
+                else:
+                    print("  No devices found. Is Bluetooth adapter enabled?")
 
             if args.once:
                 break
