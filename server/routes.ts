@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { type CollectorApiKey } from "@shared/schema";
 import OpenAI from "openai";
 import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan, runDiscoveryScan } from "./services/nmap-scanner";
+import { runPassiveScan, lookupOUI, type PassiveSignalHit } from "./services/passive-scanner";
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, testRTLTCPConnection, scanViaRTLTCP, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
@@ -896,6 +897,102 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     } catch (error) {
       console.error("Auto-scan error:", error);
       res.status(500).json({ message: "Auto-scan failed" });
+    }
+  });
+
+  // ============ PASSIVE SIGNAL SCAN ============
+  app.post("/api/scan/passive", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { signalTypes, maxSignals } = req.body || {};
+      const startTime = Date.now();
+
+      const hits = runPassiveScan({ signalTypes, maxSignals });
+
+      const userDevices = await storage.getDevices(userId);
+      const discoveredSignals: any[] = [];
+
+      for (const hit of hits) {
+        const existingDevice = userDevices.find(d =>
+          d.macAddress === hit.macAddress ||
+          (d.name === hit.broadcastName && d.signalType === hit.signalType)
+        );
+
+        let device;
+        if (existingDevice) {
+          device = existingDevice;
+          const updates: any = { lastSeenAt: new Date() };
+
+          if (hit.manufacturer && (!existingDevice.manufacturer || existingDevice.manufacturer === "Unknown")) {
+            updates.manufacturer = hit.manufacturer;
+          }
+
+          const currentName = existingDevice.name || "";
+          const isGenericName = currentName === existingDevice.macAddress
+            || /^\d+\.\d+\.\d+\.\d+$/.test(currentName)
+            || currentName === "Unknown Device";
+          if (isGenericName && hit.broadcastName) {
+            updates.name = hit.broadcastName;
+          }
+
+          if (hit.deviceType && (!existingDevice.deviceType || existingDevice.deviceType === "Network Device" || existingDevice.deviceType === "Unknown")) {
+            updates.deviceType = hit.deviceType;
+          }
+
+          await storage.updateDevice(existingDevice.id, updates);
+          device = { ...existingDevice, ...updates };
+        } else {
+          device = await storage.createDevice({
+            userId,
+            name: hit.broadcastName,
+            macAddress: hit.macAddress,
+            signalType: hit.signalType,
+            deviceType: hit.deviceType,
+            manufacturer: hit.manufacturer,
+            notes: `Passively intercepted ${hit.signalType.toUpperCase()} signal. Protocol: ${hit.protocol}. Encryption: ${hit.encryption}.`,
+          });
+          userDevices.push(device);
+        }
+
+        await storage.createObservation({
+          userId,
+          deviceId: device.id,
+          signalType: hit.signalType,
+          signalStrength: hit.rssi,
+          frequency: hit.frequency,
+          protocol: hit.protocol,
+          encryption: hit.encryption,
+        });
+
+        discoveredSignals.push({
+          id: device.id,
+          name: hit.broadcastName,
+          macAddress: hit.macAddress,
+          signalType: hit.signalType,
+          rssi: hit.rssi,
+          deviceType: hit.deviceType,
+          manufacturer: hit.manufacturer,
+          protocol: hit.protocol,
+          frequency: hit.frequency,
+          channel: hit.channel,
+          encryption: hit.encryption,
+          isNew: !existingDevice,
+        });
+      }
+
+      const endTime = Date.now();
+      await storage.logActivity(userId, "passive_scan", `Passive scan intercepted ${discoveredSignals.length} signals`);
+
+      res.json({
+        signalsIntercepted: discoveredSignals.length,
+        newDevices: discoveredSignals.filter(s => s.isNew).length,
+        signals: discoveredSignals,
+        scanTime: endTime - startTime,
+        scanType: "passive",
+      });
+    } catch (error) {
+      console.error("Passive scan error:", error);
+      res.status(500).json({ message: "Passive scan failed" });
     }
   });
 

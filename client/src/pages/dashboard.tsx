@@ -12,17 +12,31 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power, Square } from "lucide-react";
+import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power, Square, Signal, ShieldAlert, Lock } from "lucide-react";
 import { Link } from "wouter";
 import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
-interface AutoScanResult {
-  subnet: string;
-  hostsScanned: number;
-  devicesDiscovered: number;
+interface InterceptedSignal {
+  id: number;
+  name: string;
+  macAddress: string;
+  signalType: string;
+  rssi: number;
+  deviceType: string;
+  manufacturer: string;
+  protocol: string;
+  frequency: number | null;
+  channel: number | null;
+  encryption: string;
+  isNew: boolean;
+}
+
+interface PassiveScanResult {
+  signalsIntercepted: number;
   newDevices: number;
-  devices: Array<{ id: number; name: string; ip: string; hostname: string; vendor: string; isNew: boolean }>;
+  signals: InterceptedSignal[];
   scanTime: number;
+  scanType: string;
 }
 
 export default function Dashboard() {
@@ -30,8 +44,10 @@ export default function Dashboard() {
   const [monitoring, setMonitoring] = useState(false);
   const [monitorStartTime, setMonitorStartTime] = useState<number | null>(null);
   const [scanStatus, setScanStatus] = useState<"idle" | "scanning" | "complete">("idle");
-  const [lastScanResult, setLastScanResult] = useState<AutoScanResult | null>(null);
+  const [lastScanResult, setLastScanResult] = useState<PassiveScanResult | null>(null);
+  const [liveSignals, setLiveSignals] = useState<InterceptedSignal[]>([]);
   const [scanCount, setScanCount] = useState(0);
+  const [totalIntercepted, setTotalIntercepted] = useState(0);
   const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -54,12 +70,6 @@ export default function Dashboard() {
     queryKey: ["/api/sensors"],
   });
 
-  const recentDevices = monitoring && monitorStartTime
-    ? devices
-        .filter(d => d.lastSeenAt && new Date(d.lastSeenAt).getTime() >= monitorStartTime)
-        .sort((a, b) => new Date(b.lastSeenAt!).getTime() - new Date(a.lastSeenAt!).getTime())
-    : [];
-
   const sensorTypeIcons: Record<string, any> = {
     bluetooth: Bluetooth, wifi: Wifi, rfid: CircuitBoard, sdr: Antenna,
     lora: Radio, meshtastic: Radio, adsb: Satellite, sensor: Thermometer, unknown: Radar,
@@ -81,27 +91,33 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
   });
 
-  const runAutoScan = useCallback(async () => {
+  const runPassiveScan = useCallback(async () => {
     setScanStatus("scanning");
     try {
-      const res = await apiRequest("POST", "/api/scan/auto", {});
-      const result: AutoScanResult = await res.json();
+      const res = await apiRequest("POST", "/api/scan/passive", {});
+      const result: PassiveScanResult = await res.json();
       setLastScanResult(result);
       setScanCount(prev => prev + 1);
+      setTotalIntercepted(prev => prev + result.signalsIntercepted);
       setScanStatus("complete");
+
+      setLiveSignals(prev => {
+        const combined = [...result.signals, ...prev];
+        return combined.slice(0, 50);
+      });
 
       queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
 
       if (result.newDevices > 0) {
         toast({
-          title: "New Devices Found",
-          description: `Discovered ${result.newDevices} new device${result.newDevices !== 1 ? "s" : ""} on ${result.subnet}`,
+          title: "Signals Intercepted",
+          description: `Captured ${result.newDevices} new signal${result.newDevices !== 1 ? "s" : ""} (${result.signalsIntercepted} total)`,
         });
       }
     } catch (err: any) {
       setScanStatus("complete");
-      console.error("Auto-scan failed:", err);
+      console.error("Passive scan failed:", err);
     }
   }, [queryClient, toast]);
 
@@ -109,23 +125,25 @@ export default function Dashboard() {
     setMonitoring(true);
     setMonitorStartTime(Date.now());
     setScanCount(0);
+    setTotalIntercepted(0);
     setLastScanResult(null);
+    setLiveSignals([]);
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
     }
 
-    runAutoScan();
+    runPassiveScan();
 
     scanTimerRef.current = setInterval(() => {
-      runAutoScan();
-    }, 30000);
+      runPassiveScan();
+    }, 8000);
 
     toast({
-      title: "Scanning Active",
-      description: "Running network discovery. Auto-scans every 30 seconds.",
+      title: "Passive Monitoring Active",
+      description: "Listening for wireless signals across all bands.",
     });
-  }, [activeSensors, toast, updateSensorStatus, runAutoScan]);
+  }, [activeSensors, toast, updateSensorStatus, runPassiveScan]);
 
   const stopMonitoring = useCallback(() => {
     setMonitoring(false);
@@ -141,10 +159,10 @@ export default function Dashboard() {
     }
 
     toast({
-      title: "Scanning Stopped",
-      description: `${recentDevices.length} device${recentDevices.length !== 1 ? "s" : ""} detected across ${scanCount} scan${scanCount !== 1 ? "s" : ""}.`,
+      title: "Monitoring Stopped",
+      description: `Intercepted ${totalIntercepted} signal${totalIntercepted !== 1 ? "s" : ""} across ${scanCount} sweep${scanCount !== 1 ? "s" : ""}.`,
     });
-  }, [activeSensors, recentDevices.length, scanCount, toast, updateSensorStatus]);
+  }, [activeSensors, totalIntercepted, scanCount, toast, updateSensorStatus]);
 
   useEffect(() => {
     return () => {
@@ -176,6 +194,20 @@ export default function Dashboard() {
 
   const signalColor = (type: string) => sensorTypeColors[type] || "hsl(200, 20%, 50%)";
 
+  const formatFreq = (freq: number | null) => {
+    if (!freq) return "";
+    if (freq >= 1e9) return `${(freq / 1e9).toFixed(1)} GHz`;
+    if (freq >= 1e6) return `${(freq / 1e6).toFixed(1)} MHz`;
+    return `${freq} Hz`;
+  };
+
+  const rssiBar = (rssi: number, type: string) => {
+    const minRssi = type === "lora" || type === "meshtastic" ? -140 : -100;
+    const maxRssi = -20;
+    const pct = Math.max(0, Math.min(100, ((rssi - minRssi) / (maxRssi - minRssi)) * 100));
+    return pct;
+  };
+
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -199,7 +231,7 @@ export default function Dashboard() {
               data-testid="button-stop-monitor"
             >
               <Square className="w-3.5 h-3.5 mr-1.5" />
-              Stop Scanning
+              Stop Monitoring
             </Button>
           ) : (
             <Button
@@ -208,8 +240,8 @@ export default function Dashboard() {
               onClick={startMonitoring}
               data-testid="button-start-monitor"
             >
-              <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-              Start Scanning
+              <Radar className="w-3.5 h-3.5 mr-1.5" />
+              Start Passive Monitor
             </Button>
           )}
           <Button
@@ -274,7 +306,7 @@ export default function Dashboard() {
           <Card className="flex flex-col overflow-visible gap-3 p-4 relative z-10">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                {monitoring ? "Live Signal Feed" : "Sensor Status"}
+                {monitoring ? "Intercepted Signals" : "Sensor Status"}
               </p>
               {monitoring && (
                 <div className="flex items-center gap-1.5">
@@ -282,56 +314,75 @@ export default function Dashboard() {
                     <Loader2 className="w-3 h-3 animate-spin text-primary" />
                   )}
                   <Badge variant="default" className="text-[8px] animate-pulse">
-                    LIVE
+                    LISTENING
                   </Badge>
                 </div>
               )}
             </div>
 
-            {monitoring && scanStatus === "scanning" && recentDevices.length === 0 && (
+            {monitoring && scanStatus === "scanning" && liveSignals.length === 0 && (
               <div className="flex flex-col items-center justify-center py-8 gap-3">
                 <ScanPulse active={true} size={60} />
-                <p className="text-xs text-muted-foreground">Scanning network...</p>
+                <p className="text-xs text-muted-foreground">Listening for signals...</p>
                 <p className="text-[10px] text-muted-foreground text-center max-w-[220px]">
-                  Running network discovery to find active devices.
+                  Passively monitoring wireless bands for Bluetooth, Wi-Fi, LoRa, ADS-B, and other signals.
                 </p>
               </div>
             )}
 
-            {monitoring && recentDevices.length > 0 && (
+            {monitoring && liveSignals.length > 0 && (
               <>
-                {lastScanResult && (
-                  <div className="flex items-center justify-between gap-2 text-[9px] text-muted-foreground border-b border-border/30 pb-2">
-                    <span>Subnet: {lastScanResult.subnet}</span>
-                    <span>Scan #{scanCount} | {lastScanResult.devicesDiscovered} hosts</span>
-                  </div>
-                )}
-                <ScrollArea className="max-h-[280px]">
+                <div className="flex items-center justify-between gap-2 text-[9px] text-muted-foreground border-b border-border/30 pb-2">
+                  <span>Sweep #{scanCount} | {totalIntercepted} signals captured</span>
+                  <span>{lastScanResult?.scanTime ?? 0}ms</span>
+                </div>
+                <ScrollArea className="max-h-[320px]">
                   <div className="flex flex-col gap-1" data-testid="monitor-feed-list">
-                    {recentDevices.map((device, i) => {
-                      const SIcon = sensorTypeIcons[device.signalType || "unknown"] || Radar;
+                    {liveSignals.map((sig, i) => {
+                      const SIcon = sensorTypeIcons[sig.signalType] || Radar;
+                      const strength = rssiBar(sig.rssi, sig.signalType);
                       return (
                         <div
-                          key={device.id}
-                          className="flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 border-primary/30 bg-primary/5 cursor-pointer"
-                          data-testid={`monitor-feed-item-${i}`}
-                          onClick={() => setSelectedDeviceId(device.id)}
+                          key={`${sig.macAddress}-${i}`}
+                          className={`flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 cursor-pointer ${
+                            sig.isNew
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-border/30 bg-muted/5"
+                          }`}
+                          data-testid={`signal-feed-item-${i}`}
+                          onClick={() => setSelectedDeviceId(sig.id)}
                         >
-                          <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(device.signalType || "unknown") }} />
+                          <div className="flex flex-col items-center gap-0.5 shrink-0 w-6">
+                            <SIcon className="w-3.5 h-3.5" style={{ color: signalColor(sig.signalType) }} />
+                            <div className="w-3 h-[3px] rounded-full overflow-hidden bg-muted">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${strength}%`,
+                                  backgroundColor: signalColor(sig.signalType),
+                                }}
+                              />
+                            </div>
+                          </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1">
-                              <p className="truncate font-medium text-[11px]">{device.name}</p>
+                              <p className="truncate font-medium text-[11px]">{sig.name}</p>
+                              {sig.isNew && (
+                                <Badge variant="default" className="text-[7px] px-1 py-0 leading-tight">
+                                  NEW
+                                </Badge>
+                              )}
                             </div>
                             <p className="text-[9px] text-muted-foreground truncate">
-                              {device.macAddress} | {device.manufacturer || "Unknown"}
+                              {sig.macAddress} | {sig.manufacturer}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="text-[10px] font-mono" style={{ color: signalColor(device.signalType || "unknown") }}>
-                              {device.signalType?.toUpperCase()}
+                            <p className="text-[10px] font-mono tabular-nums" style={{ color: signalColor(sig.signalType) }}>
+                              {sig.rssi} dBm
                             </p>
-                            <p className="text-[8px] text-muted-foreground">
-                              {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleTimeString() : ""}
+                            <p className="text-[8px] text-muted-foreground font-mono">
+                              {sig.protocol.split(" ")[0]}
                             </p>
                           </div>
                         </div>
@@ -342,12 +393,12 @@ export default function Dashboard() {
               </>
             )}
 
-            {monitoring && scanStatus === "complete" && recentDevices.length === 0 && (
+            {monitoring && scanStatus === "complete" && liveSignals.length === 0 && (
               <div className="flex flex-col items-center justify-center py-6 gap-2">
                 <ScanPulse active={true} size={50} />
-                <p className="text-xs text-muted-foreground">No new devices found yet</p>
+                <p className="text-xs text-muted-foreground">No signals detected yet</p>
                 <p className="text-[10px] text-muted-foreground text-center max-w-[220px]">
-                  Next scan in ~30 seconds. Devices on the network will appear here automatically.
+                  Next sweep in ~8 seconds. Intercepted signals will appear here.
                 </p>
               </div>
             )}
@@ -358,7 +409,7 @@ export default function Dashboard() {
                   <ScanPulse active={false} size={50} />
                   <p className="text-xs text-muted-foreground">Select a node to view details</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {devices.length} node{devices.length !== 1 ? "s" : ""} discovered
+                    {devices.length} node{devices.length !== 1 ? "s" : ""} in database
                   </p>
                 </div>
 
@@ -378,7 +429,7 @@ export default function Dashboard() {
                             <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
                             <span className="flex-1 truncate">{sensor.name}</span>
                             <Badge variant="outline" className="text-[8px] uppercase">
-                              {sensor.isActive ? (sensor.status === "collecting" ? "scanning" : "ready") : "off"}
+                              {sensor.isActive ? (sensor.status === "collecting" ? "listening" : "ready") : "off"}
                             </Badge>
                           </div>
                         );
@@ -394,8 +445,8 @@ export default function Dashboard() {
                   className="w-full"
                   data-testid="button-start-scan-panel"
                 >
-                  <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-                  Start Network Scan
+                  <Radar className="w-3.5 h-3.5 mr-1.5" />
+                  Start Passive Monitor
                 </Button>
               </>
             )}
@@ -409,7 +460,7 @@ export default function Dashboard() {
                 data-testid="button-stop-scan-panel"
               >
                 <Square className="w-3.5 h-3.5 mr-1.5" />
-                Stop Scanning ({recentDevices.length} devices found)
+                Stop Monitoring ({totalIntercepted} signals captured)
               </Button>
             )}
           </Card>
