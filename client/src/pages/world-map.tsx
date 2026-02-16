@@ -43,7 +43,7 @@ export default function WorldMapPage() {
         />
       </div>
       {selectedDevice && (
-        <div className="w-[350px] flex-shrink-0">
+        <div className="w-[350px] flex-shrink-0 relative z-10">
           <DeviceDetail
             device={selectedDevice}
             observations={observations}

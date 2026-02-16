@@ -209,7 +209,7 @@ export default function Dashboard() {
         </div>
 
         {selectedDevice && (
-          <div className="min-h-[400px] lg:min-h-0">
+          <div className="min-h-[400px] lg:min-h-0 relative z-10">
             <DeviceDetail
               device={selectedDevice}
               observations={observations}
@@ -221,7 +221,7 @@ export default function Dashboard() {
         )}
 
         {!selectedDevice && (
-          <Card className="flex flex-col overflow-visible gap-3 p-4">
+          <Card className="flex flex-col overflow-visible gap-3 p-4 relative z-10">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
                 {monitoring ? "Live Signal Feed" : "Sensor Status"}

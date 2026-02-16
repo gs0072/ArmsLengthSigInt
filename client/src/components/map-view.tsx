@@ -385,7 +385,7 @@ export function MapView({
   }, []);
 
   return (
-    <Card className={`relative overflow-visible ${className}`}>
+    <Card className={`relative overflow-visible isolate z-0 ${className}`}>
       <div className="absolute top-2 left-2 right-2 z-[1000] flex items-start gap-2">
         <div className="relative flex-1 max-w-sm">
           <div className="flex gap-1">
