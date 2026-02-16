@@ -2,7 +2,6 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
-import { seedDatabase } from "./seed";
 import { z } from "zod";
 import OpenAI from "openai";
 import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan } from "./services/nmap-scanner";
@@ -82,17 +81,7 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
 
-  const seededUsers = new Set<string>();
-  app.use("/api", async (req: any, res, next) => {
-    const userId = req.user?.claims?.sub;
-    if (!userId || seededUsers.has(userId)) return next();
-    try {
-      await seedDatabase(userId);
-      seededUsers.add(userId);
-    } catch (e) {
-    }
-    next();
-  });
+  
 
   app.get("/api/devices", isAuthenticated, async (req: any, res) => {
     try {
