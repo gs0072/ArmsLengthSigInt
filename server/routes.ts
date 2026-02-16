@@ -6,7 +6,7 @@ import { z } from "zod";
 import crypto from "crypto";
 import { type CollectorApiKey } from "@shared/schema";
 import OpenAI from "openai";
-import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan } from "./services/nmap-scanner";
+import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan, runDiscoveryScan } from "./services/nmap-scanner";
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, testRTLTCPConnection, scanViaRTLTCP, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
@@ -781,7 +781,7 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
         return res.status(500).json({ message: "Could not detect server network subnet." });
       }
 
-      const scanResult = await runPingScan(subnet);
+      const scanResult = await runDiscoveryScan(subnet);
 
       if (scanResult.error) {
         return res.status(400).json({ message: scanResult.error });
@@ -796,32 +796,68 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
         const ports = host.ports || [];
         const hostname = host.hostname || "";
         const vendor = host.vendor || "";
-        const identifier = host.mac || host.ip;
+        const deviceLabel = host.deviceLabel || "Network Host";
+        const openPorts = ports.filter((p: any) => p.state === "open");
+        const openPortsSummary = openPorts.map((p: any) => `${p.port}/${p.service}${p.version ? ` (${p.version})` : ""}`).join(", ");
+
+        const deviceName = deviceLabel !== "Network Host"
+          ? `${deviceLabel} (${host.ip})`
+          : hostname
+            ? `${hostname} (${host.ip})`
+            : host.ip;
+
+        const deviceType = host.os
+          || (openPorts.length > 0 ? deviceLabel : "")
+          || "Network Device";
+
         const existingDevice = userDevices.find(d =>
           (host.mac && d.macAddress === host.mac) ||
           (d.macAddress === host.ip) ||
-          (hostname && d.name === hostname)
+          (hostname && !(/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) && d.name === hostname)
         );
 
         let device;
         if (existingDevice) {
           device = existingDevice;
-          await storage.updateDevice(existingDevice.id, {
-            lastSeenAt: new Date(),
-            ...(vendor && (!existingDevice.manufacturer || existingDevice.manufacturer === "Unknown")
-              ? { manufacturer: vendor } : {}),
-            ...(hostname && existingDevice.name === existingDevice.macAddress
-              ? { name: hostname } : {}),
-          });
+          const updates: any = { lastSeenAt: new Date() };
+
+          if (vendor && (!existingDevice.manufacturer || existingDevice.manufacturer === "Unknown")) {
+            updates.manufacturer = vendor;
+          }
+
+          const currentName = existingDevice.name || "";
+          const isGenericName = currentName === existingDevice.macAddress
+            || /^\d+\.\d+\.\d+\.\d+$/.test(currentName)
+            || currentName === "Network Host"
+            || currentName.startsWith("Network Host (");
+          if (isGenericName) {
+            if (deviceLabel !== "Network Host") {
+              updates.name = deviceName;
+            } else if (hostname && !(/^\d+\.\d+\.\d+\.\d+$/.test(hostname))) {
+              updates.name = `${hostname} (${host.ip})`;
+            }
+          }
+
+          if (deviceType && deviceType !== "Network Device" &&
+              (!existingDevice.deviceType || existingDevice.deviceType === "Network Device")) {
+            updates.deviceType = deviceType;
+          }
+
+          if (openPortsSummary && existingDevice.notes && !existingDevice.notes.includes("Open ports")) {
+            updates.notes = `${existingDevice.notes}. Open ports: ${openPortsSummary}`;
+          }
+
+          await storage.updateDevice(existingDevice.id, updates);
+          device = { ...existingDevice, ...updates };
         } else {
           device = await storage.createDevice({
             userId,
-            name: hostname || host.ip,
+            name: deviceName,
             macAddress: host.mac || host.ip,
             signalType: "wifi",
-            deviceType: host.os || "Network Device",
+            deviceType,
             manufacturer: vendor || "Unknown",
-            notes: `Auto-discovered via network scan. IP: ${host.ip}${ports.length > 0 ? `. Open ports: ${ports.map((p: any) => `${p.port}/${p.service}`).join(", ")}` : ""}`,
+            notes: `Auto-discovered via network scan. IP: ${host.ip}${openPortsSummary ? `. Open ports: ${openPortsSummary}` : ""}`,
           });
         }
 
@@ -841,8 +877,9 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
           ip: host.ip,
           hostname,
           vendor,
+          deviceLabel,
           isNew: !existingDevice,
-          ports,
+          ports: openPorts,
         });
       }
 
