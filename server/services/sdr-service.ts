@@ -164,31 +164,60 @@ export async function getSDRDevices(): Promise<SDRDevice[]> {
 export async function testRTLTCPConnection(host: string, port: number): Promise<RTLTCPConnection> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
-    const timeout = setTimeout(() => {
+    let resolved = false;
+    let didConnect = false;
+    const done = (result: RTLTCPConnection) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
       socket.destroy();
-      resolve({ host, port, connected: false, error: "Connection timed out (5s)" });
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      done({ host, port, connected: false, error: `Connection timed out after 5s. If using ngrok, make sure you're using the ngrok-assigned port (not 1234).` });
     }, 5000);
 
     socket.connect(port, host, () => {
-      clearTimeout(timeout);
-      const result: RTLTCPConnection = { host, port, connected: true, deviceInfo: "RTL-SDR via rtl_tcp" };
+      didConnect = true;
       const chunks: Buffer[] = [];
       socket.on("data", (data) => {
         chunks.push(data);
-        if (Buffer.concat(chunks).length >= 12) {
-          socket.destroy();
-          resolve(result);
+        const combined = Buffer.concat(chunks);
+        if (combined.length >= 12) {
+          const magic = combined.toString("ascii", 0, 4);
+          done({
+            host, port, connected: true,
+            deviceInfo: magic === "RTL0" ? "RTL-SDR via rtl_tcp (verified)" : "rtl_tcp server responding",
+          });
         }
       });
       setTimeout(() => {
-        socket.destroy();
-        resolve(result);
-      }, 1000);
+        const totalBytes = chunks.reduce((sum, c) => sum + c.length, 0);
+        if (totalBytes > 0) {
+          done({ host, port, connected: true, deviceInfo: "rtl_tcp server responding (partial handshake)" });
+        } else {
+          done({ host, port, connected: false, deviceInfo: undefined, error: `TCP port ${port} is open on ${host}, but no rtl_tcp data was received. Verify rtl_tcp is actually running on that port.` });
+        }
+      }, 2000);
     });
 
     socket.on("error", (err) => {
-      clearTimeout(timeout);
-      resolve({ host, port, connected: false, error: err.message });
+      let errorMsg = err.message;
+      if (err.message.includes("ECONNREFUSED")) {
+        errorMsg = `Connection refused at ${host}:${port}. Make sure rtl_tcp is running and the port is correct.`;
+      } else if (err.message.includes("ENOTFOUND")) {
+        errorMsg = `Host "${host}" not found. Check the hostname — enter just the hostname (e.g. 0.tcp.ngrok.io), not a full command.`;
+      } else if (err.message.includes("ETIMEDOUT")) {
+        errorMsg = `Connection timed out to ${host}:${port}. Check your firewall or tunnel setup.`;
+      }
+      done({ host, port, connected: false, error: errorMsg });
+    });
+
+    socket.on("close", () => {
+      if (!didConnect) {
+        done({ host, port, connected: false, error: `Connection to ${host}:${port} was closed before completing. The port may not be running rtl_tcp.` });
+      }
     });
   });
 }
@@ -559,6 +588,10 @@ export async function runPowerScan(
       source: "server",
     };
   } catch (err: any) {
+    let errorMsg = err.message || "SDR scan failed.";
+    if (errorMsg.includes("Command failed") || errorMsg.includes("rtl_power")) {
+      errorMsg = "No USB RTL-SDR device detected on this server. Since your SDR is plugged into your local machine, switch to 'Remote rtl_tcp' mode and use ngrok to tunnel the connection.";
+    }
     return {
       startFreq: startFreqMHz * 1e6,
       endFreq: endFreqMHz * 1e6,
@@ -566,7 +599,7 @@ export async function runPowerScan(
       endTime: Date.now(),
       signals: [],
       rawOutput: "",
-      error: err.message || "SDR scan failed. Ensure RTL-SDR device is connected.",
+      error: errorMsg,
       source: "server",
     };
   }

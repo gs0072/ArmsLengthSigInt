@@ -472,7 +472,7 @@ export default function SDRPage() {
   const [startFreq, setStartFreq] = useState("88");
   const [endFreq, setEndFreq] = useState("108");
   const [mode, setMode] = useState<ConnectionMode>("simulation");
-  const [rtlTcpHost, setRtlTcpHost] = useState("127.0.0.1");
+  const [rtlTcpHost, setRtlTcpHost] = useState("");
   const [rtlTcpPort, setRtlTcpPort] = useState("1234");
   const [scanning, setScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(false);
@@ -513,6 +513,21 @@ export default function SDRPage() {
   });
 
   const runScan = useCallback(async () => {
+    if (mode === "rtl_tcp") {
+      if (!rtlTcpHost.trim()) {
+        toast({ title: "Missing Host", description: "Enter your ngrok or public hostname in the rtl_tcp Server section", variant: "destructive" });
+        return;
+      }
+      if (rtlTcpHost.includes("127.0.0.1") || rtlTcpHost.includes("localhost")) {
+        toast({ title: "Invalid Host", description: "127.0.0.1 / localhost refers to this cloud server, not your machine. Use ngrok or your public IP.", variant: "destructive" });
+        return;
+      }
+      const portNum = parseInt(rtlTcpPort);
+      if (!rtlTcpPort.trim() || isNaN(portNum) || portNum < 1 || portNum > 65535) {
+        toast({ title: "Invalid Port", description: "Enter a valid port number (1-65535).", variant: "destructive" });
+        return;
+      }
+    }
     setScanning(true);
     try {
       const res = await apiRequest("POST", "/api/sdr/scan", {
@@ -682,24 +697,45 @@ export default function SDRPage() {
                   <Server className="w-3.5 h-3.5" style={{ color: "hsl(200, 80%, 55%)" }} />
                   rtl_tcp Server
                 </div>
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded p-2 text-[9px] text-muted-foreground">
+                  Your RTL-SDR is on your local machine, but this app runs in the cloud. You need a tunnel (like ngrok) so the app can reach your rtl_tcp server. Do NOT use 127.0.0.1 — that points to the cloud server.
+                </div>
                 <div className="flex gap-2">
                   <Input
                     value={rtlTcpHost}
                     onChange={e => setRtlTcpHost(e.target.value)}
-                    placeholder="Host IP"
+                    placeholder="e.g. 0.tcp.ngrok.io"
                     className="text-xs h-8 font-mono flex-1"
                     data-testid="input-rtltcp-host"
                   />
                   <Input
                     value={rtlTcpPort}
                     onChange={e => setRtlTcpPort(e.target.value)}
-                    placeholder="Port"
+                    placeholder="e.g. 12345"
                     className="text-xs h-8 font-mono w-20"
                     data-testid="input-rtltcp-port"
                   />
                 </div>
+                <p className="text-[8px] text-muted-foreground/70">
+                  Host = ngrok hostname (e.g. 0.tcp.ngrok.io). Port = ngrok-assigned port (NOT 1234 — ngrok picks a different port).
+                </p>
                 <Button
-                  onClick={() => testConnectionMutation.mutate()}
+                  onClick={() => {
+                    if (!rtlTcpHost.trim()) {
+                      toast({ title: "Missing Host", description: "Enter your ngrok or public hostname first", variant: "destructive" });
+                      return;
+                    }
+                    if (rtlTcpHost.includes("127.0.0.1") || rtlTcpHost.includes("localhost")) {
+                      toast({ title: "Invalid Host", description: "127.0.0.1 / localhost refers to this cloud server, not your machine. Use ngrok or your public IP.", variant: "destructive" });
+                      return;
+                    }
+                    const portNum = parseInt(rtlTcpPort);
+                    if (!rtlTcpPort.trim() || isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                      toast({ title: "Invalid Port", description: "Enter a valid port number (1-65535). Check your ngrok output for the assigned port.", variant: "destructive" });
+                      return;
+                    }
+                    testConnectionMutation.mutate();
+                  }}
                   disabled={testConnectionMutation.isPending}
                   variant="outline"
                   className="w-full text-xs"
@@ -743,7 +779,10 @@ export default function SDRPage() {
                       <div>
                         <p className="text-foreground/70 font-sans font-medium">Option A: ngrok (easiest)</p>
                         <p>$ ngrok tcp 1234</p>
-                        <p className="text-foreground/60">Copy the forwarding address (e.g. 0.tcp.ngrok.io:12345) and paste it as Host:Port above.</p>
+                        <p className="text-foreground/60">ngrok will show a forwarding line like:</p>
+                        <p className="text-foreground/80">Forwarding tcp://0.tcp.ngrok.io:12345</p>
+                        <p className="text-foreground/60">Enter <strong>0.tcp.ngrok.io</strong> as Host and <strong>12345</strong> as Port above.</p>
+                        <p className="text-foreground/60">Important: The port ngrok assigns (12345) is NOT the same as your local port (1234)!</p>
                       </div>
                       <div>
                         <p className="text-foreground/70 font-sans font-medium">Option B: Port forward</p>
