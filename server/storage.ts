@@ -1,5 +1,5 @@
 import {
-  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations, trustedUsers, osintLinks, customSignatures,
+  users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations, trustedUsers, osintLinks, customSignatures, collectorApiKeys,
   type User, type UpsertUser,
   type Device, type InsertDevice,
   type Observation, type InsertObservation,
@@ -13,6 +13,7 @@ import {
   type TrustedUser, type InsertTrustedUser,
   type OsintLink, type InsertOsintLink,
   type CustomSignature, type InsertCustomSignature,
+  type CollectorApiKey, type InsertCollectorApiKey,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
@@ -79,6 +80,12 @@ export interface IStorage {
   createCustomSignature(sig: InsertCustomSignature): Promise<CustomSignature>;
   deleteCustomSignature(id: number): Promise<void>;
   deleteCustomSignaturesByCategory(userId: string, category: string): Promise<void>;
+
+  getCollectorApiKeys(userId: string): Promise<CollectorApiKey[]>;
+  createCollectorApiKey(key: InsertCollectorApiKey): Promise<CollectorApiKey>;
+  deleteCollectorApiKey(id: number): Promise<void>;
+  getCollectorApiKeyByKey(apiKey: string): Promise<CollectorApiKey | undefined>;
+  updateCollectorApiKeyLastUsed(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -380,6 +387,28 @@ export class DatabaseStorage implements IStorage {
 
   async deleteCustomSignaturesByCategory(userId: string, category: string): Promise<void> {
     await db.delete(customSignatures).where(and(eq(customSignatures.userId, userId), eq(customSignatures.category, category)));
+  }
+
+  async getCollectorApiKeys(userId: string): Promise<CollectorApiKey[]> {
+    return db.select().from(collectorApiKeys).where(eq(collectorApiKeys.userId, userId)).orderBy(desc(collectorApiKeys.createdAt));
+  }
+
+  async createCollectorApiKey(key: InsertCollectorApiKey): Promise<CollectorApiKey> {
+    const [created] = await db.insert(collectorApiKeys).values(key).returning();
+    return created;
+  }
+
+  async deleteCollectorApiKey(id: number): Promise<void> {
+    await db.delete(collectorApiKeys).where(eq(collectorApiKeys.id, id));
+  }
+
+  async getCollectorApiKeyByKey(apiKey: string): Promise<CollectorApiKey | undefined> {
+    const [key] = await db.select().from(collectorApiKeys).where(eq(collectorApiKeys.apiKey, apiKey));
+    return key || undefined;
+  }
+
+  async updateCollectorApiKeyLastUsed(id: number): Promise<void> {
+    await db.update(collectorApiKeys).set({ lastUsedAt: new Date() }).where(eq(collectorApiKeys.id, id));
   }
 }
 

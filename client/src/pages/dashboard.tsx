@@ -13,24 +13,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power, Square } from "lucide-react";
-import { startPassiveScan, stopPassiveScan, getCurrentPosition, type ScanSession, type DiscoveredNode } from "@/lib/ble-scanner";
 import { Link } from "wouter";
 import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanFeed, setScanFeed] = useState<DiscoveredNode[]>([]);
-  const sessionsRef = useRef<ScanSession[]>([]);
+  const [monitoring, setMonitoring] = useState(false);
+  const [monitorStartTime, setMonitorStartTime] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const { data: devices = [], isLoading: devicesLoading } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
+    refetchInterval: monitoring ? 5000 : false,
   });
 
   const { data: observations = [], isLoading: obsLoading } = useQuery<Observation[]>({
     queryKey: ["/api/observations"],
+    refetchInterval: monitoring ? 5000 : false,
   });
 
   const { data: alerts = [] } = useQuery<Alert[]>({
@@ -40,6 +40,12 @@ export default function Dashboard() {
   const { data: sensors = [] } = useQuery<CollectionSensor[]>({
     queryKey: ["/api/sensors"],
   });
+
+  const recentDevices = monitoring && monitorStartTime
+    ? devices
+        .filter(d => d.lastSeenAt && new Date(d.lastSeenAt).getTime() >= monitorStartTime)
+        .sort((a, b) => new Date(b.lastSeenAt!).getTime() - new Date(a.lastSeenAt!).getTime())
+    : [];
 
   const sensorTypeIcons: Record<string, any> = {
     bluetooth: Bluetooth, wifi: Wifi, rfid: CircuitBoard, sdr: Antenna,
@@ -62,136 +68,32 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
   });
 
-  const persistNode = useCallback(async (node: DiscoveredNode, sensorName: string, sensorId: number) => {
-    try {
-      const pos = await getCurrentPosition();
-      const existingRes = await fetch(`/api/devices/by-mac/${encodeURIComponent(node.id)}`, { credentials: "include" });
-      const existing = existingRes.ok ? await existingRes.json() : null;
-      let device: Device;
-
-      if (existing && existing.id) {
-        device = existing;
-        if (node.resolved) {
-          const updates: Record<string, any> = {};
-          if ((!existing.name || existing.name === existing.macAddress || existing.name.endsWith(" Device")) && node.name && node.name !== node.id) {
-            updates.name = node.name;
-          }
-          if ((!existing.manufacturer || existing.manufacturer === "Unknown") && node.manufacturer && node.manufacturer !== "Unknown") {
-            updates.manufacturer = node.manufacturer;
-          }
-          if ((!existing.deviceType || existing.deviceType === "Unknown") && node.deviceType && node.deviceType !== "Unknown") {
-            updates.deviceType = node.deviceType;
-          }
-          if (Object.keys(updates).length > 0) {
-            const patchRes = await apiRequest("PATCH", `/api/devices/${existing.id}`, updates);
-            device = await patchRes.json();
-          }
-        }
-      } else {
-        const createRes = await apiRequest("POST", "/api/devices", {
-          name: node.name || node.id,
-          macAddress: node.id,
-          signalType: node.signalType,
-          deviceType: node.deviceType || "Unknown",
-          manufacturer: node.manufacturer || "Unknown",
-          notes: `Passively discovered by sensor: ${sensorName}`,
-        });
-        device = await createRes.json();
-      }
-
-      const obsBody: Record<string, any> = {
-        deviceId: device.id,
-        signalType: node.signalType,
-        signalStrength: node.rssi,
-        protocol: node.protocol,
-        encryption: node.encryption,
-      };
-      if (node.frequency) obsBody.frequency = node.frequency;
-      if (node.channel) obsBody.channel = node.channel;
-      if (node.hasTelemetry && node.broadcastLat != null && node.broadcastLng != null) {
-        obsBody.latitude = node.broadcastLat;
-        obsBody.longitude = node.broadcastLng;
-        if (node.broadcastAlt != null) obsBody.altitude = node.broadcastAlt;
-      } else if (pos) {
-        obsBody.latitude = pos.lat;
-        obsBody.longitude = pos.lng;
-        if (pos.alt != null) obsBody.altitude = pos.alt;
-      }
-      await apiRequest("POST", "/api/observations", obsBody);
-
-      await apiRequest("PATCH", `/api/sensors/${sensorId}`, {
-        nodesCollected: ((sensors.find(s => s.id === sensorId)?.nodesCollected) || 0) + 1,
-      });
-
-      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/sensors"] });
-    } catch {
-    }
-  }, [queryClient, sensors]);
-
-  const runScan = useCallback(() => {
-    if (activeSensors.length === 0) {
-      toast({
-        title: "No Active Sensors",
-        description: "Enable sensors in Settings before scanning.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setScanning(true);
-    setScanFeed([]);
+  const startMonitoring = useCallback(() => {
+    setMonitoring(true);
+    setMonitorStartTime(Date.now());
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
-
-      const session = startPassiveScan(
-        sensor.sensorType,
-        (node) => {
-          setScanFeed(prev => {
-            const existing = prev.findIndex(n => n.id === node.id);
-            if (existing >= 0) {
-              const updated = [...prev];
-              updated[existing] = node;
-              return updated;
-            }
-            return [node, ...prev];
-          });
-          persistNode(node, sensor.name, sensor.id);
-        },
-        1500
-      );
-      sessionsRef.current.push(session);
     }
 
     toast({
-      title: "Passive Scan Started",
-      description: `Monitoring ${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""} for nearby signals...`,
+      title: "Monitoring Active",
+      description: "Watching for new signals from collector scripts. Data refreshes every 5 seconds.",
     });
-  }, [activeSensors, toast, updateSensorStatus, persistNode]);
+  }, [activeSensors, toast, updateSensorStatus]);
 
-  const stopScan = useCallback(() => {
-    sessionsRef.current.forEach(s => stopPassiveScan(s));
-    sessionsRef.current = [];
-    setScanning(false);
+  const stopMonitoring = useCallback(() => {
+    setMonitoring(false);
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
     }
 
     toast({
-      title: "Scan Stopped",
-      description: `Discovered ${scanFeed.length} signal${scanFeed.length !== 1 ? "s" : ""} during session.`,
+      title: "Monitoring Stopped",
+      description: `${recentDevices.length} signal${recentDevices.length !== 1 ? "s" : ""} detected during session.`,
     });
-  }, [activeSensors, scanFeed.length, toast, updateSensorStatus]);
-
-  useEffect(() => {
-    return () => {
-      sessionsRef.current.forEach(s => stopPassiveScan(s));
-      sessionsRef.current = [];
-    };
-  }, []);
+  }, [activeSensors, recentDevices.length, toast, updateSensorStatus]);
 
   const toggleTrack = useMutation({
     mutationFn: async (id: number) => {
@@ -230,26 +132,26 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {sensors.length > 0 ? (
-            scanning ? (
+            monitoring ? (
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={stopScan}
-                data-testid="button-stop-scan"
+                onClick={stopMonitoring}
+                data-testid="button-stop-monitor"
               >
                 <Square className="w-3.5 h-3.5 mr-1.5" />
-                Stop Scan
+                Stop Monitoring
               </Button>
             ) : (
               <Button
                 size="sm"
                 variant="default"
-                onClick={runScan}
+                onClick={startMonitoring}
                 disabled={activeSensors.length === 0}
-                data-testid="button-start-scan"
+                data-testid="button-start-monitor"
               >
                 <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-                Start Scan
+                Start Monitoring
               </Button>
             )
           ) : (
@@ -322,44 +224,43 @@ export default function Dashboard() {
           <Card className="flex flex-col overflow-visible gap-3 p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                {scanning ? "Live Signal Feed" : "Sensor Status"}
+                {monitoring ? "Live Signal Feed" : "Sensor Status"}
               </p>
-              {scanning && (
+              {monitoring && (
                 <Badge variant="default" className="text-[8px] animate-pulse">
                   LIVE
                 </Badge>
               )}
             </div>
 
-            {scanning && scanFeed.length > 0 && (
+            {monitoring && recentDevices.length > 0 && (
               <ScrollArea className="max-h-[280px]">
-                <div className="flex flex-col gap-1" data-testid="scan-feed-list">
-                  {scanFeed.map((node, i) => {
-                    const SIcon = sensorTypeIcons[node.signalType] || Radar;
-                    const isResolved = "resolved" in node && node.resolved;
+                <div className="flex flex-col gap-1" data-testid="monitor-feed-list">
+                  {recentDevices.map((device, i) => {
+                    const SIcon = sensorTypeIcons[device.signalType || "unknown"] || Radar;
                     return (
                       <div
-                        key={node.id}
-                        className={`flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 ${isResolved ? "border-primary/30 bg-primary/5" : "border-muted-foreground/20 bg-muted/10"}`}
-                        data-testid={`scan-feed-item-${i}`}
+                        key={device.id}
+                        className="flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 border-primary/30 bg-primary/5 cursor-pointer"
+                        data-testid={`monitor-feed-item-${i}`}
+                        onClick={() => setSelectedDeviceId(device.id)}
                       >
-                        <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(node.signalType) }} />
+                        <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(device.signalType || "unknown") }} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1">
-                            <p className="truncate font-medium text-[11px]">{node.name}</p>
-                            {!isResolved && <span className="text-[7px] text-muted-foreground italic shrink-0">resolving</span>}
-                            {node.hasTelemetry && <span className="text-[7px] text-primary shrink-0">GPS</span>}
+                            <p className="truncate font-medium text-[11px]">{device.name}</p>
                           </div>
                           <p className="text-[9px] text-muted-foreground truncate">
-                            {node.id} | {node.manufacturer}
-                            {node.shortName && !node.longName && <> | SN: {node.shortName}</>}
+                            {device.macAddress} | {device.manufacturer || "Unknown"}
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-[10px] font-mono" style={{ color: signalColor(node.signalType) }}>
-                            {node.rssi} dBm
+                          <p className="text-[10px] font-mono" style={{ color: signalColor(device.signalType || "unknown") }}>
+                            {device.signalType?.toUpperCase()}
                           </p>
-                          <p className="text-[8px] text-muted-foreground uppercase">{node.protocol}</p>
+                          <p className="text-[8px] text-muted-foreground">
+                            {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleTimeString() : ""}
+                          </p>
                         </div>
                       </div>
                     );
@@ -368,14 +269,17 @@ export default function Dashboard() {
               </ScrollArea>
             )}
 
-            {scanning && scanFeed.length === 0 && (
+            {monitoring && recentDevices.length === 0 && (
               <div className="flex flex-col items-center justify-center py-8 gap-3">
                 <ScanPulse active={true} size={60} />
-                <p className="text-xs text-muted-foreground">Scanning for signals...</p>
+                <p className="text-xs text-muted-foreground">Waiting for collector data...</p>
+                <p className="text-[10px] text-muted-foreground text-center max-w-[220px]">
+                  Run your collector script to push signals here. Data refreshes every 5 seconds.
+                </p>
               </div>
             )}
 
-            {!scanning && (
+            {!monitoring && (
               <>
                 <div className="flex flex-col items-center justify-center py-4 gap-2">
                   <ScanPulse active={false} size={50} />
@@ -401,7 +305,7 @@ export default function Dashboard() {
                             <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
                             <span className="flex-1 truncate">{sensor.name}</span>
                             <Badge variant="outline" className="text-[8px] uppercase">
-                              {sensor.isActive ? (sensor.status === "collecting" ? "scanning" : "ready") : "off"}
+                              {sensor.isActive ? (sensor.status === "collecting" ? "monitoring" : "ready") : "off"}
                             </Badge>
                           </div>
                         );
@@ -410,13 +314,13 @@ export default function Dashboard() {
                     <Button
                       size="sm"
                       variant="default"
-                      onClick={runScan}
+                      onClick={startMonitoring}
                       disabled={activeSensors.length === 0}
                       className="w-full"
-                      data-testid="button-start-scan-panel"
+                      data-testid="button-start-monitor-panel"
                     >
                       <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-                      Start Scan ({activeSensors.length} active)
+                      Start Monitoring ({activeSensors.length} active)
                     </Button>
                   </div>
                 ) : (
@@ -433,16 +337,16 @@ export default function Dashboard() {
               </>
             )}
 
-            {scanning && (
+            {monitoring && (
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={stopScan}
+                onClick={stopMonitoring}
                 className="w-full"
-                data-testid="button-stop-scan-panel"
+                data-testid="button-stop-monitor-panel"
               >
                 <Square className="w-3.5 h-3.5 mr-1.5" />
-                Stop Scan ({scanFeed.length} signals found)
+                Stop Monitoring ({recentDevices.length} signals detected)
               </Button>
             )}
           </Card>

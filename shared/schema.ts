@@ -268,6 +268,20 @@ export const customSignatures = pgTable("custom_signatures", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const collectorApiKeys = pgTable("collector_api_keys", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  name: text("name").notNull(),
+  apiKey: varchar("api_key").notNull().unique(),
+  isActive: boolean("is_active").notNull().default(true),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCollectorApiKeySchema = createInsertSchema(collectorApiKeys).omit({ id: true, createdAt: true, lastUsedAt: true });
+export type CollectorApiKey = typeof collectorApiKeys.$inferSelect;
+export type InsertCollectorApiKey = z.infer<typeof insertCollectorApiKeySchema>;
+
 export const insertTrustedUserSchema = createInsertSchema(trustedUsers).omit({ id: true, addedAt: true });
 export const insertOsintLinkSchema = createInsertSchema(osintLinks).omit({ id: true, createdAt: true });
 export const insertCustomSignatureSchema = createInsertSchema(customSignatures).omit({ id: true, createdAt: true });

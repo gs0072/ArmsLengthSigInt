@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { z } from "zod";
+import crypto from "crypto";
+import { type CollectorApiKey } from "@shared/schema";
 import OpenAI from "openai";
 import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan } from "./services/nmap-scanner";
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
@@ -1479,6 +1481,140 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
       res.json({ hits, totalHits: hits.reduce((sum, h) => sum + h.matchedDevices.length, 0) });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/collector/keys", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const keys = await storage.getCollectorApiKeys(userId);
+      const masked = keys.map(k => ({
+        ...k,
+        apiKey: "..." + k.apiKey.slice(-8),
+      }));
+      res.json(masked);
+    } catch (error) {
+      console.error("Error fetching collector API keys:", error);
+      res.status(500).json({ message: "Failed to fetch API keys" });
+    }
+  });
+
+  app.post("/api/collector/keys", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const parsed = z.object({ name: z.string().min(1) }).safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const apiKey = crypto.randomBytes(32).toString("hex");
+      const key = await storage.createCollectorApiKey({
+        userId,
+        name: parsed.data.name,
+        apiKey,
+        isActive: true,
+      });
+      await storage.logActivity(userId, "create_collector_key", `Created collector API key: ${parsed.data.name}`, req.ip);
+      res.status(201).json(key);
+    } catch (error) {
+      console.error("Error creating collector API key:", error);
+      res.status(500).json({ message: "Failed to create API key" });
+    }
+  });
+
+  app.delete("/api/collector/keys/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const keys = await storage.getCollectorApiKeys(userId);
+      const key = keys.find(k => k.id === id);
+      if (!key) return res.status(404).json({ message: "API key not found" });
+      await storage.deleteCollectorApiKey(id);
+      await storage.logActivity(userId, "delete_collector_key", `Deleted collector API key: ${key.name}`, req.ip);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting collector API key:", error);
+      res.status(500).json({ message: "Failed to delete API key" });
+    }
+  });
+
+  const collectorPushSchema = z.object({
+    devices: z.array(z.object({
+      macAddress: z.string(),
+      name: z.string().optional(),
+      signalType: z.enum(["bluetooth", "wifi", "rfid", "sdr", "lora", "meshtastic", "adsb", "sensor", "unknown"]).default("unknown"),
+      deviceType: z.string().optional(),
+      manufacturer: z.string().optional(),
+      signalStrength: z.number().optional(),
+      frequency: z.number().optional(),
+      channel: z.number().int().optional(),
+      protocol: z.string().optional(),
+      encryption: z.string().optional(),
+      latitude: z.number().optional(),
+      longitude: z.number().optional(),
+    })),
+  });
+
+  app.post("/api/collector/push", async (req: any, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ message: "Missing or invalid Authorization header" });
+      }
+      const apiKeyValue = authHeader.slice(7);
+      const keyRecord = await storage.getCollectorApiKeyByKey(apiKeyValue);
+      if (!keyRecord) {
+        return res.status(401).json({ message: "Invalid API key" });
+      }
+      if (!keyRecord.isActive) {
+        return res.status(403).json({ message: "API key is inactive" });
+      }
+
+      const parsed = collectorPushSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const userId = keyRecord.userId;
+      let created = 0;
+      let updated = 0;
+
+      for (const d of parsed.data.devices) {
+        let device = await storage.getDeviceByMac(userId, d.macAddress);
+
+        if (device) {
+          const updates: Record<string, any> = { lastSeenAt: new Date() };
+          if ((!device.name || device.name === "Unknown") && d.name) updates.name = d.name;
+          if ((!device.manufacturer || device.manufacturer === "Unknown") && d.manufacturer) updates.manufacturer = d.manufacturer;
+          await storage.updateDevice(device.id, updates);
+          updated++;
+        } else {
+          device = await storage.createDevice({
+            userId,
+            macAddress: d.macAddress,
+            name: d.name || null,
+            signalType: d.signalType,
+            deviceType: d.deviceType || null,
+            manufacturer: d.manufacturer || null,
+          });
+          created++;
+        }
+
+        await storage.createObservation({
+          deviceId: device.id,
+          userId,
+          signalType: d.signalType,
+          signalStrength: d.signalStrength ?? null,
+          frequency: d.frequency ?? null,
+          latitude: d.latitude ?? null,
+          longitude: d.longitude ?? null,
+          channel: d.channel ?? null,
+          protocol: d.protocol ?? null,
+          encryption: d.encryption ?? null,
+        });
+      }
+
+      await storage.updateCollectorApiKeyLastUsed(keyRecord.id);
+
+      res.json({ processed: parsed.data.devices.length, created, updated });
+    } catch (error) {
+      console.error("Error processing collector push:", error);
+      res.status(500).json({ message: "Failed to process push data" });
     }
   });
 
