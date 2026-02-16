@@ -488,8 +488,8 @@ export function MapView({
       </div>
       <div
         ref={mapRef}
-        className="w-full rounded-md"
-        style={{ height: fullscreen ? "calc(100vh - 120px)" : "400px" }}
+        className={`w-full rounded-md ${fullscreen ? "" : "h-[280px] sm:h-[350px] lg:h-[400px]"}`}
+        style={fullscreen ? { height: "calc(100vh - 120px)" } : undefined}
         data-testid="map-container"
       />
       <style>{`

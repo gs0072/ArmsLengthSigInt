@@ -321,7 +321,7 @@ export default function Dashboard() {
   const recentDevices = devices.slice(0, 20);
 
   return (
-    <div className="flex flex-col h-full p-3 gap-3 overflow-auto">
+    <div className="flex flex-col h-full p-3 gap-3 overflow-auto" style={{ WebkitOverflowScrolling: "touch" }}>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-sm font-semibold uppercase tracking-wider" data-testid="text-dashboard-title">
@@ -433,8 +433,8 @@ export default function Dashboard() {
         <StatsBar devices={devices} observations={observations} alerts={alerts} />
       )}
 
-      <div className="grid gap-3 flex-1 min-h-0 lg:grid-cols-[1fr_320px] xl:grid-cols-[1fr_350px]">
-        <div className="flex flex-col gap-3 min-h-0">
+      <div className="grid gap-3 lg:grid-cols-[1fr_320px] xl:grid-cols-[1fr_350px]" style={{ minHeight: 0 }}>
+        <div className="flex flex-col gap-3" style={{ minHeight: 0 }}>
           <MapView
             observations={observations}
             devices={devices}
@@ -444,7 +444,7 @@ export default function Dashboard() {
             onToggleFullscreen={() => {}}
           />
 
-          <div className="flex-1 min-h-[300px]">
+          <div className="h-[350px] sm:h-[400px] lg:flex-1 lg:h-auto" style={{ minHeight: "300px" }}>
             <DeviceList
               devices={devices}
               observations={observations}
@@ -456,7 +456,7 @@ export default function Dashboard() {
         </div>
 
         {selectedDevice && (
-          <div className="min-h-[400px] lg:min-h-0 relative z-10">
+          <div className="h-[400px] sm:h-[450px] lg:h-auto relative z-10">
             <DeviceDetail
               device={selectedDevice}
               observations={observations}
