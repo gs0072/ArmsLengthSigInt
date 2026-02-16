@@ -8,7 +8,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Key, Copy, Trash2, Plus, Loader2, AlertTriangle, Download, Wifi, Bluetooth, Radio, Terminal, ExternalLink, HardDrive } from "lucide-react";
+import { Key, Copy, Trash2, Plus, Loader2, AlertTriangle, Download, Wifi, Bluetooth, Radio, Terminal, ExternalLink, HardDrive, Monitor, Smartphone } from "lucide-react";
+import { SiApple, SiAndroid, SiLinux } from "react-icons/si";
+import { FaWindows } from "react-icons/fa";
 
 interface CollectorKey {
   id: number;
@@ -49,11 +51,83 @@ const COLLECTOR_SCRIPTS = [
   },
 ];
 
+type PlatformTab = "windows" | "macos" | "linux" | "ios" | "android";
+
+const PLATFORM_GUIDES: Record<PlatformTab, { label: string; instructions: { step: string; code?: string; note?: string }[]; icon: typeof Monitor }> = {
+  windows: {
+    label: "Windows",
+    icon: Monitor,
+    instructions: [
+      { step: "Install Python 3.8+ from python.org or Microsoft Store. During install, check 'Add Python to PATH'." },
+      { step: "Open Command Prompt or PowerShell and install dependencies:", code: "pip install requests bleak" },
+      { step: "Download a collector script from below and save it (e.g. to Desktop or Documents)." },
+      { step: "Run the setup check to verify everything is working:", code: "python sigint_collector.py --setup" },
+      { step: "Run the collector with your API key:", code: "python sigint_collector.py --key YOUR_API_KEY --url APP_URL" },
+      { step: "For WiFi scanning, the built-in 'netsh wlan' is used automatically. For Bluetooth, ensure your Bluetooth adapter is turned on in Settings > Bluetooth." },
+      { step: "Optional: Add GPS coordinates for location tagging:", code: "python sigint_collector.py --key YOUR_KEY --url APP_URL --lat 38.89 --lng -77.03 --interval 15" },
+      { note: "Run as Administrator for best WiFi results. Some Bluetooth adapters may need updated drivers from the manufacturer's website." },
+    ],
+  },
+  macos: {
+    label: "macOS",
+    icon: Monitor,
+    instructions: [
+      { step: "macOS includes Python 3 via Xcode Command Line Tools. Install if needed:", code: "xcode-select --install" },
+      { step: "Install required Python packages (use system Python for best Apple framework compatibility):", code: "/usr/bin/python3 -m pip install requests bleak pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation" },
+      { step: "Download a collector script from below and save it to a folder." },
+      { step: "Run the setup diagnostic to check your environment:", code: "python3 sigint_collector.py --setup" },
+      { step: "Enable required macOS permissions in System Settings > Privacy & Security:", note: "Location Services: Enable for Terminal/iTerm. Bluetooth: Enable for Terminal/iTerm. These are required for WiFi and Bluetooth scanning." },
+      { step: "Run the collector:", code: "python3 sigint_collector.py --key YOUR_API_KEY --url APP_URL" },
+      { note: "Apple removed the 'airport' WiFi scanning tool in macOS Sonoma 14.4+. These scripts use Apple's CoreWLAN framework instead, which requires Location Services permission. Bluetooth on macOS returns UUID-style addresses instead of real MAC addresses due to Apple's privacy protections - the scripts handle this automatically." },
+    ],
+  },
+  linux: {
+    label: "Linux",
+    icon: Monitor,
+    instructions: [
+      { step: "Install Python 3 and pip if not already available:", code: "sudo apt install python3 python3-pip   # Debian/Ubuntu\nsudo dnf install python3 python3-pip   # Fedora/RHEL" },
+      { step: "Install required Python packages:", code: "pip3 install requests bleak" },
+      { step: "Download a collector script from below." },
+      { step: "Run the setup diagnostic:", code: "python3 sigint_collector.py --setup" },
+      { step: "For WiFi scanning, install wireless-tools or iw:", code: "sudo apt install wireless-tools iw   # Debian/Ubuntu" },
+      { step: "Run the collector (may need sudo for WiFi scanning):", code: "sudo python3 sigint_collector.py --key YOUR_API_KEY --url APP_URL" },
+      { step: "For Bluetooth scanning, ensure your Bluetooth service is running:", code: "sudo systemctl start bluetooth\nsudo systemctl enable bluetooth" },
+      { note: "Linux provides the most complete scanning capabilities. Use 'sudo' for WiFi scanning to access interface details. For dedicated WiFi monitoring, external adapters like the Alfa AWUS036ACH with monitor mode support work best." },
+    ],
+  },
+  ios: {
+    label: "iOS",
+    icon: Smartphone,
+    instructions: [
+      { step: "iOS does not support running Python collector scripts directly. Instead, use the Phone Bluetooth Scanner mode built into this app." },
+      { step: "Open this app in Safari or Chrome on your iPhone/iPad." },
+      { step: "On the Dashboard, tap the mode toggle and select 'Phone' mode (appears automatically when Web Bluetooth is supported)." },
+      { step: "Tap 'Scan' to discover nearby Bluetooth devices. Each scan opens a device picker - select a device to add it to your collection." },
+      { note: "Web Bluetooth support on iOS is limited. Chrome on iOS may support it via experimental flags, but Safari has limited support. For full iOS Bluetooth scanning, consider using a companion Mac running the Bluetooth collector script. WiFi scanning is not available from iOS browsers due to Apple's security restrictions." },
+      { step: "Alternative: Use a Mac or PC on the same network running collector scripts, and view results on your iPhone through this web app." },
+    ],
+  },
+  android: {
+    label: "Android",
+    icon: Smartphone,
+    instructions: [
+      { step: "Android has two scanning options: Phone mode (built-in) and Termux (advanced)." },
+      { step: "Option 1 - Phone Bluetooth Scanner: Open this app in Chrome on your Android device. On the Dashboard, switch to 'Phone' mode and tap 'Scan' to discover nearby Bluetooth devices via Web Bluetooth API." },
+      { step: "Option 2 - Full Collector via Termux: Install Termux from F-Droid (not Play Store).", note: "The Play Store version of Termux is outdated. Use F-Droid for the latest version." },
+      { step: "In Termux, install Python and dependencies:", code: "pkg install python\npip install requests bleak" },
+      { step: "Download and run a collector script in Termux:", code: "python sigint_collector.py --key YOUR_API_KEY --url APP_URL" },
+      { step: "For GPS tagging on Android, enable Location in system settings. Chrome's Phone mode will attempt to use your GPS automatically." },
+      { note: "Chrome on Android provides the best Web Bluetooth experience for the Phone scanner mode. For WiFi scanning via Termux, root access may be required. The Phone mode is recommended for most Android users as it requires no extra setup." },
+    ],
+  },
+};
+
 export default function SettingsPage() {
   const { data: profile } = useQuery<UserProfile>({ queryKey: ["/api/profile"] });
   const { toast } = useToast();
 
   const [newKeyName, setNewKeyName] = useState("");
+  const [activePlatform, setActivePlatform] = useState<PlatformTab>("windows");
   const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; apiKey: string } | null>(null);
 
   const updateDataModeMutation = useMutation({
@@ -323,91 +397,53 @@ export default function SettingsPage() {
             <div className="space-y-3 pt-3 border-t border-border/30">
               <div className="flex items-center gap-2">
                 <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
-                <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Setup Instructions</h4>
+                <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Installation Guide</h4>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">1</Badge>
-                  <p className="text-[10px] text-muted-foreground">
-                    Generate a Collector API Key above (if you have not already).
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">2</Badge>
-                  <p className="text-[10px] text-muted-foreground">
-                    Download a collector script and save it to your computer.
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">3</Badge>
-                  <div className="flex-1">
-                    <p className="text-[10px] text-muted-foreground">
-                      Install Python dependencies on your machine:
-                    </p>
-                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all">
-                      pip3 install requests bleak
-                    </code>
-                    <p className="text-[9px] text-muted-foreground/70 mt-1">
-                      macOS additional: pip3 install pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">4</Badge>
-                  <div className="flex-1">
-                    <p className="text-[10px] text-muted-foreground">
-                      Check your setup (optional but recommended):
-                    </p>
-                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all">
-                      python3 sigint_collector.py --setup
-                    </code>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">5</Badge>
-                  <div className="flex-1">
-                    <p className="text-[10px] text-muted-foreground">
-                      Run the script with your API key and this app's URL:
-                    </p>
-                    <code className="block mt-1 text-[10px] font-mono bg-muted/20 px-2 py-1.5 rounded-md select-all leading-relaxed">
-                      python3 sigint_collector.py --key YOUR_API_KEY --url {appUrl}
-                    </code>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">6</Badge>
-                  <p className="text-[10px] text-muted-foreground">
-                    Optional: Add GPS coordinates for location tagging with --lat and --lng flags.
-                  </p>
-                </div>
+              <div className="flex gap-1 flex-wrap">
+                {(Object.keys(PLATFORM_GUIDES) as PlatformTab[]).map((platform) => {
+                  const PIcon = platform === "windows" ? FaWindows : platform === "macos" ? SiApple : platform === "linux" ? SiLinux : platform === "android" ? SiAndroid : Smartphone;
+                  return (
+                    <Button
+                      key={platform}
+                      size="sm"
+                      variant={activePlatform === platform ? "default" : "outline"}
+                      className="text-[10px] toggle-elevate"
+                      onClick={() => setActivePlatform(platform)}
+                      data-testid={`button-platform-${platform}`}
+                    >
+                      <PIcon className="w-3 h-3 mr-1" />
+                      {PLATFORM_GUIDES[platform].label}
+                    </Button>
+                  );
+                })}
               </div>
 
-              <div className="p-2.5 rounded-md border border-border/30 bg-muted/10">
-                <p className="text-[10px] text-muted-foreground font-medium mb-1.5">
-                  Full command example:
-                </p>
-                <code className="block text-[9px] font-mono text-muted-foreground leading-relaxed select-all break-all">
-                  python3 sigint_multi_collector.py --key YOUR_KEY --url {appUrl} --lat 38.8977 --lng -77.0365 --interval 15
-                </code>
-              </div>
-
-              <div className="p-2.5 rounded-md border border-border/30 bg-muted/10 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="w-3 h-3 text-muted-foreground shrink-0" />
-                  <p className="text-[10px] text-muted-foreground font-medium">macOS Setup Guide</p>
-                </div>
-                <div className="text-[9px] text-muted-foreground space-y-1">
-                  <p>Apple removed the airport WiFi scanning tool in macOS Sonoma 14.4+. The scripts now use Apple's CoreWLAN framework instead.</p>
-                  <p className="font-medium">Quick install for macOS:</p>
-                  <code className="block mt-0.5 text-[9px] font-mono bg-muted/20 px-2 py-1 rounded-md select-all break-all">
-                    pip3 install requests bleak pyobjc-framework-CoreWLAN pyobjc-framework-CoreLocation
-                  </code>
-                  <p className="mt-1">After installing, enable these macOS permissions:</p>
-                  <p>- Location Services for Terminal: System Settings &gt; Privacy &gt; Location Services</p>
-                  <p>- Bluetooth for Terminal: System Settings &gt; Privacy &gt; Bluetooth</p>
-                  <p className="mt-1">Tip: Using /usr/bin/python3 (system Python) gives the best compatibility with Apple frameworks.</p>
-                </div>
+              <div className="space-y-2 p-2.5 rounded-md border border-border/30 bg-muted/5" data-testid={`text-platform-guide-${activePlatform}`}>
+                {PLATFORM_GUIDES[activePlatform].instructions.map((inst, i) => (
+                  <div key={i} className="space-y-1">
+                    {inst.step && (
+                      <div className="flex items-start gap-2">
+                        <Badge variant="outline" className="text-[8px] shrink-0 mt-0.5">{i + 1}</Badge>
+                        <p className="text-[10px] text-muted-foreground">{inst.step}</p>
+                      </div>
+                    )}
+                    {inst.code && (
+                      <code className="block ml-6 text-[9px] font-mono bg-muted/20 px-2 py-1.5 rounded-md select-all whitespace-pre-wrap break-all leading-relaxed">
+                        {inst.code.replace(/APP_URL/g, appUrl)}
+                      </code>
+                    )}
+                    {inst.note && !inst.step && (
+                      <div className="flex items-start gap-2 p-2 rounded-md border border-primary/20 bg-primary/5 ml-0">
+                        <AlertTriangle className="w-3 h-3 text-primary shrink-0 mt-0.5" />
+                        <p className="text-[9px] text-muted-foreground">{inst.note}</p>
+                      </div>
+                    )}
+                    {inst.note && inst.step && (
+                      <p className="text-[9px] text-muted-foreground/70 ml-6">{inst.note}</p>
+                    )}
+                  </div>
+                ))}
               </div>
 
               <div className="flex items-start gap-2 p-2 rounded-md border border-yellow-500/20 bg-yellow-500/5">
