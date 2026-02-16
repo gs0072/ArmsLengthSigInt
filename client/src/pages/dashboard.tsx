@@ -349,21 +349,19 @@ export default function Dashboard() {
               <HardDrive className="w-3 h-3" />
               Hardware
             </button>
-            {webBluetooth.isSupported && (
-              <button
-                className={`px-3 py-1.5 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 min-h-[32px] ${
-                  dataSource === "phone"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-transparent text-muted-foreground"
-                }`}
-                onClick={() => { if (!monitoring) setDataSource("phone"); }}
-                disabled={monitoring}
-                data-testid="button-source-phone"
-              >
-                <Smartphone className="w-3 h-3" />
-                Phone
-              </button>
-            )}
+            <button
+              className={`px-3 py-1.5 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 min-h-[32px] ${
+                dataSource === "phone"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-transparent text-muted-foreground"
+              }`}
+              onClick={() => { if (!monitoring) setDataSource("phone"); }}
+              disabled={monitoring}
+              data-testid="button-source-phone"
+            >
+              <Smartphone className="w-3 h-3" />
+              Phone
+            </button>
             <button
               className={`px-3 py-1.5 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 min-h-[32px] ${
                 dataSource === "simulation"
@@ -685,9 +683,20 @@ export default function Dashboard() {
                 <div className="flex flex-col items-center justify-center py-4 gap-2">
                   <Smartphone className="w-8 h-8 text-primary/60" />
                   <p className="text-xs text-muted-foreground font-medium">Phone Bluetooth Scanner</p>
-                  <p className="text-[10px] text-muted-foreground text-center max-w-[260px]">
-                    Use your phone's built-in Bluetooth to scan for nearby devices. Tap the button below to open the device picker - each scan discovers one device at a time.
-                  </p>
+                  {webBluetooth.isSupported ? (
+                    <p className="text-[10px] text-muted-foreground text-center max-w-[260px]">
+                      Use your phone's built-in Bluetooth to scan for nearby devices. Tap the button below to open the device picker - each scan discovers one device at a time.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 p-3 rounded-md border border-yellow-500/20 bg-yellow-500/5 max-w-[300px]">
+                      <p className="text-[10px] text-muted-foreground text-center font-medium">
+                        Web Bluetooth is not supported in this browser.
+                      </p>
+                      <p className="text-[9px] text-muted-foreground/70 text-center">
+                        To use Phone mode, open this app in Chrome on an Android device or a Chromium-based desktop browser with Web Bluetooth enabled. iOS Safari does not support Web Bluetooth.
+                      </p>
+                    </div>
+                  )}
                   {webBluetooth.error && (
                     <p className="text-[10px] text-destructive text-center max-w-[260px]">
                       {webBluetooth.error}
@@ -736,7 +745,7 @@ export default function Dashboard() {
                   size="sm"
                   variant="default"
                   onClick={runPhoneScan}
-                  disabled={webBluetooth.isScanning}
+                  disabled={webBluetooth.isScanning || !webBluetooth.isSupported}
                   className="w-full"
                   data-testid="button-phone-scan"
                 >
