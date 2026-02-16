@@ -16,10 +16,23 @@ import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, 
 import { Link } from "wouter";
 import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
+interface AutoScanResult {
+  subnet: string;
+  hostsScanned: number;
+  devicesDiscovered: number;
+  newDevices: number;
+  devices: Array<{ id: number; name: string; ip: string; hostname: string; vendor: string; isNew: boolean }>;
+  scanTime: number;
+}
+
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [monitoring, setMonitoring] = useState(false);
   const [monitorStartTime, setMonitorStartTime] = useState<number | null>(null);
+  const [scanStatus, setScanStatus] = useState<"idle" | "scanning" | "complete">("idle");
+  const [lastScanResult, setLastScanResult] = useState<AutoScanResult | null>(null);
+  const [scanCount, setScanCount] = useState(0);
+  const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -68,32 +81,79 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
   });
 
+  const runAutoScan = useCallback(async () => {
+    setScanStatus("scanning");
+    try {
+      const res = await apiRequest("POST", "/api/scan/auto", {});
+      const result: AutoScanResult = await res.json();
+      setLastScanResult(result);
+      setScanCount(prev => prev + 1);
+      setScanStatus("complete");
+
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+
+      if (result.newDevices > 0) {
+        toast({
+          title: "New Devices Found",
+          description: `Discovered ${result.newDevices} new device${result.newDevices !== 1 ? "s" : ""} on ${result.subnet}`,
+        });
+      }
+    } catch (err: any) {
+      setScanStatus("complete");
+      console.error("Auto-scan failed:", err);
+    }
+  }, [queryClient, toast]);
+
   const startMonitoring = useCallback(() => {
     setMonitoring(true);
     setMonitorStartTime(Date.now());
+    setScanCount(0);
+    setLastScanResult(null);
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
     }
 
+    runAutoScan();
+
+    scanTimerRef.current = setInterval(() => {
+      runAutoScan();
+    }, 30000);
+
     toast({
-      title: "Monitoring Active",
-      description: "Watching for new signals from collector scripts. Data refreshes every 5 seconds.",
+      title: "Scanning Active",
+      description: "Running network discovery. Auto-scans every 30 seconds.",
     });
-  }, [activeSensors, toast, updateSensorStatus]);
+  }, [activeSensors, toast, updateSensorStatus, runAutoScan]);
 
   const stopMonitoring = useCallback(() => {
     setMonitoring(false);
+    setScanStatus("idle");
+
+    if (scanTimerRef.current) {
+      clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
     }
 
     toast({
-      title: "Monitoring Stopped",
-      description: `${recentDevices.length} signal${recentDevices.length !== 1 ? "s" : ""} detected during session.`,
+      title: "Scanning Stopped",
+      description: `${recentDevices.length} device${recentDevices.length !== 1 ? "s" : ""} detected across ${scanCount} scan${scanCount !== 1 ? "s" : ""}.`,
     });
-  }, [activeSensors, recentDevices.length, toast, updateSensorStatus]);
+  }, [activeSensors, recentDevices.length, scanCount, toast, updateSensorStatus]);
+
+  useEffect(() => {
+    return () => {
+      if (scanTimerRef.current) {
+        clearInterval(scanTimerRef.current);
+        scanTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const toggleTrack = useMutation({
     mutationFn: async (id: number) => {
@@ -131,36 +191,26 @@ export default function Dashboard() {
           </Badge>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {sensors.length > 0 ? (
-            monitoring ? (
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={stopMonitoring}
-                data-testid="button-stop-monitor"
-              >
-                <Square className="w-3.5 h-3.5 mr-1.5" />
-                Stop Monitoring
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="default"
-                onClick={startMonitoring}
-                disabled={activeSensors.length === 0}
-                data-testid="button-start-monitor"
-              >
-                <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-                Start Monitoring
-              </Button>
-            )
+          {monitoring ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={stopMonitoring}
+              data-testid="button-stop-monitor"
+            >
+              <Square className="w-3.5 h-3.5 mr-1.5" />
+              Stop Scanning
+            </Button>
           ) : (
-            <Link href="/settings">
-              <Button size="sm" variant="outline" data-testid="button-configure-sensors">
-                <Settings className="w-3.5 h-3.5 mr-1.5" />
-                Configure Sensors
-              </Button>
-            </Link>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={startMonitoring}
+              data-testid="button-start-monitor"
+            >
+              <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
+              Start Scanning
+            </Button>
           )}
           <Button
             size="icon"
@@ -227,54 +277,77 @@ export default function Dashboard() {
                 {monitoring ? "Live Signal Feed" : "Sensor Status"}
               </p>
               {monitoring && (
-                <Badge variant="default" className="text-[8px] animate-pulse">
-                  LIVE
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  {scanStatus === "scanning" && (
+                    <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                  )}
+                  <Badge variant="default" className="text-[8px] animate-pulse">
+                    LIVE
+                  </Badge>
+                </div>
               )}
             </div>
 
-            {monitoring && recentDevices.length > 0 && (
-              <ScrollArea className="max-h-[280px]">
-                <div className="flex flex-col gap-1" data-testid="monitor-feed-list">
-                  {recentDevices.map((device, i) => {
-                    const SIcon = sensorTypeIcons[device.signalType || "unknown"] || Radar;
-                    return (
-                      <div
-                        key={device.id}
-                        className="flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 border-primary/30 bg-primary/5 cursor-pointer"
-                        data-testid={`monitor-feed-item-${i}`}
-                        onClick={() => setSelectedDeviceId(device.id)}
-                      >
-                        <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(device.signalType || "unknown") }} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1">
-                            <p className="truncate font-medium text-[11px]">{device.name}</p>
-                          </div>
-                          <p className="text-[9px] text-muted-foreground truncate">
-                            {device.macAddress} | {device.manufacturer || "Unknown"}
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-[10px] font-mono" style={{ color: signalColor(device.signalType || "unknown") }}>
-                            {device.signalType?.toUpperCase()}
-                          </p>
-                          <p className="text-[8px] text-muted-foreground">
-                            {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleTimeString() : ""}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            )}
-
-            {monitoring && recentDevices.length === 0 && (
+            {monitoring && scanStatus === "scanning" && recentDevices.length === 0 && (
               <div className="flex flex-col items-center justify-center py-8 gap-3">
                 <ScanPulse active={true} size={60} />
-                <p className="text-xs text-muted-foreground">Waiting for collector data...</p>
+                <p className="text-xs text-muted-foreground">Scanning network...</p>
                 <p className="text-[10px] text-muted-foreground text-center max-w-[220px]">
-                  Run your collector script to push signals here. Data refreshes every 5 seconds.
+                  Running network discovery to find active devices.
+                </p>
+              </div>
+            )}
+
+            {monitoring && recentDevices.length > 0 && (
+              <>
+                {lastScanResult && (
+                  <div className="flex items-center justify-between gap-2 text-[9px] text-muted-foreground border-b border-border/30 pb-2">
+                    <span>Subnet: {lastScanResult.subnet}</span>
+                    <span>Scan #{scanCount} | {lastScanResult.devicesDiscovered} hosts</span>
+                  </div>
+                )}
+                <ScrollArea className="max-h-[280px]">
+                  <div className="flex flex-col gap-1" data-testid="monitor-feed-list">
+                    {recentDevices.map((device, i) => {
+                      const SIcon = sensorTypeIcons[device.signalType || "unknown"] || Radar;
+                      return (
+                        <div
+                          key={device.id}
+                          className="flex items-center gap-2 p-2 rounded-md border text-xs animate-in fade-in slide-in-from-top-1 duration-300 border-primary/30 bg-primary/5 cursor-pointer"
+                          data-testid={`monitor-feed-item-${i}`}
+                          onClick={() => setSelectedDeviceId(device.id)}
+                        >
+                          <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color: signalColor(device.signalType || "unknown") }} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1">
+                              <p className="truncate font-medium text-[11px]">{device.name}</p>
+                            </div>
+                            <p className="text-[9px] text-muted-foreground truncate">
+                              {device.macAddress} | {device.manufacturer || "Unknown"}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-[10px] font-mono" style={{ color: signalColor(device.signalType || "unknown") }}>
+                              {device.signalType?.toUpperCase()}
+                            </p>
+                            <p className="text-[8px] text-muted-foreground">
+                              {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleTimeString() : ""}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </>
+            )}
+
+            {monitoring && scanStatus === "complete" && recentDevices.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-6 gap-2">
+                <ScanPulse active={true} size={50} />
+                <p className="text-xs text-muted-foreground">No new devices found yet</p>
+                <p className="text-[10px] text-muted-foreground text-center max-w-[220px]">
+                  Next scan in ~30 seconds. Devices on the network will appear here automatically.
                 </p>
               </div>
             )}
@@ -289,7 +362,7 @@ export default function Dashboard() {
                   </p>
                 </div>
 
-                {sensors.length > 0 ? (
+                {sensors.length > 0 && (
                   <div className="flex flex-col gap-3 w-full">
                     <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Sensors</p>
                     <div className="flex flex-col gap-1.5">
@@ -305,35 +378,25 @@ export default function Dashboard() {
                             <SIcon className="w-3.5 h-3.5 shrink-0" style={{ color }} />
                             <span className="flex-1 truncate">{sensor.name}</span>
                             <Badge variant="outline" className="text-[8px] uppercase">
-                              {sensor.isActive ? (sensor.status === "collecting" ? "monitoring" : "ready") : "off"}
+                              {sensor.isActive ? (sensor.status === "collecting" ? "scanning" : "ready") : "off"}
                             </Badge>
                           </div>
                         );
                       })}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={startMonitoring}
-                      disabled={activeSensors.length === 0}
-                      className="w-full"
-                      data-testid="button-start-monitor-panel"
-                    >
-                      <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
-                      Start Monitoring ({activeSensors.length} active)
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2 w-full">
-                    <p className="text-[10px] text-muted-foreground">No sensors configured yet</p>
-                    <Link href="/settings">
-                      <Button size="sm" variant="outline" className="w-full" data-testid="button-goto-settings-panel">
-                        <Settings className="w-3.5 h-3.5 mr-1.5" />
-                        Configure Sensors in Settings
-                      </Button>
-                    </Link>
                   </div>
                 )}
+
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={startMonitoring}
+                  className="w-full"
+                  data-testid="button-start-scan-panel"
+                >
+                  <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
+                  Start Network Scan
+                </Button>
               </>
             )}
 
@@ -343,10 +406,10 @@ export default function Dashboard() {
                 variant="destructive"
                 onClick={stopMonitoring}
                 className="w-full"
-                data-testid="button-stop-monitor-panel"
+                data-testid="button-stop-scan-panel"
               >
                 <Square className="w-3.5 h-3.5 mr-1.5" />
-                Stop Monitoring ({recentDevices.length} signals detected)
+                Stop Scanning ({recentDevices.length} devices found)
               </Button>
             )}
           </Card>

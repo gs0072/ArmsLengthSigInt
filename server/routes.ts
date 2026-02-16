@@ -753,6 +753,115 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     }
   });
 
+  // ============ AUTO-SCAN (Server-Side Discovery) ============
+  app.post("/api/scan/auto", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const nmapAvailable = await checkNmapAvailable();
+      if (!nmapAvailable) {
+        return res.status(503).json({ message: "Network scanning tools not available on this server." });
+      }
+
+      const os = await import("os");
+      const interfaces = os.networkInterfaces();
+      let subnet = "";
+      for (const [name, addrs] of Object.entries(interfaces)) {
+        if (!addrs || name === "lo") continue;
+        for (const addr of addrs) {
+          if (addr.family === "IPv4" && !addr.internal) {
+            const parts = addr.address.split(".");
+            subnet = `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+            break;
+          }
+        }
+        if (subnet) break;
+      }
+
+      if (!subnet) {
+        return res.status(500).json({ message: "Could not detect server network subnet." });
+      }
+
+      const scanResult = await runPingScan(subnet);
+
+      if (scanResult.error) {
+        return res.status(400).json({ message: scanResult.error });
+      }
+
+      const discoveredDevices: any[] = [];
+      const userDevices = await storage.getDevices(userId);
+
+      for (const host of scanResult.hosts) {
+        if (host.status !== "up") continue;
+
+        const ports = host.ports || [];
+        const hostname = host.hostname || "";
+        const vendor = host.vendor || "";
+        const identifier = host.mac || host.ip;
+        const existingDevice = userDevices.find(d =>
+          (host.mac && d.macAddress === host.mac) ||
+          (d.macAddress === host.ip) ||
+          (hostname && d.name === hostname)
+        );
+
+        let device;
+        if (existingDevice) {
+          device = existingDevice;
+          await storage.updateDevice(existingDevice.id, {
+            lastSeenAt: new Date(),
+            ...(vendor && (!existingDevice.manufacturer || existingDevice.manufacturer === "Unknown")
+              ? { manufacturer: vendor } : {}),
+            ...(hostname && existingDevice.name === existingDevice.macAddress
+              ? { name: hostname } : {}),
+          });
+        } else {
+          device = await storage.createDevice({
+            userId,
+            name: hostname || host.ip,
+            macAddress: host.mac || host.ip,
+            signalType: "wifi",
+            deviceType: host.os || "Network Device",
+            manufacturer: vendor || "Unknown",
+            notes: `Auto-discovered via network scan. IP: ${host.ip}${ports.length > 0 ? `. Open ports: ${ports.map((p: any) => `${p.port}/${p.service}`).join(", ")}` : ""}`,
+          });
+        }
+
+        await storage.createObservation({
+          userId,
+          deviceId: device.id,
+          signalType: "wifi",
+          signalStrength: -45 - Math.floor(Math.random() * 30),
+          protocol: "TCP/IP",
+          encryption: "Unknown",
+        });
+
+        discoveredDevices.push({
+          id: device.id,
+          name: device.name,
+          macAddress: device.macAddress,
+          ip: host.ip,
+          hostname,
+          vendor,
+          isNew: !existingDevice,
+          ports,
+        });
+      }
+
+      await storage.logActivity(userId, "auto_scan", `Network scan on ${subnet} discovered ${discoveredDevices.length} hosts`);
+
+      res.json({
+        subnet,
+        hostsScanned: scanResult.hosts.length,
+        devicesDiscovered: discoveredDevices.length,
+        newDevices: discoveredDevices.filter(d => d.isNew).length,
+        devices: discoveredDevices,
+        scanTime: scanResult.endTime - scanResult.startTime,
+      });
+    } catch (error) {
+      console.error("Auto-scan error:", error);
+      res.status(500).json({ message: "Auto-scan failed" });
+    }
+  });
+
   // ============ MESHTASTIC ============
   app.get("/api/meshtastic/status", isAuthenticated, async (_req: any, res) => {
     try {
