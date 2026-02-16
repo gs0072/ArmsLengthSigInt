@@ -12,8 +12,9 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power, Square, Signal, ShieldAlert, Lock, HardDrive, Cpu, Download } from "lucide-react";
+import { Play, Pause, RefreshCw, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, Settings, Loader2, ScanSearch, Power, Square, Signal, ShieldAlert, Lock, HardDrive, Cpu, Download, Smartphone } from "lucide-react";
 import { Link } from "wouter";
+import { useWebBluetooth } from "@/hooks/use-web-bluetooth";
 import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
 
 interface InterceptedSignal {
@@ -49,7 +50,7 @@ interface CollectorStatus {
   isReceivingHardwareData: boolean;
 }
 
-type DataSourceMode = "hardware" | "simulation";
+type DataSourceMode = "hardware" | "simulation" | "phone";
 
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
@@ -65,6 +66,7 @@ export default function Dashboard() {
   const scanTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const webBluetooth = useWebBluetooth();
 
   const { data: devices = [], isLoading: devicesLoading } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
@@ -139,6 +141,45 @@ export default function Dashboard() {
       console.error("Passive scan failed:", err);
     }
   }, [queryClient, toast]);
+
+  const pushPhoneDevice = useMutation({
+    mutationFn: async (bleDevice: { name: string; id: string }) => {
+      const macAddress = bleDevice.id.includes(":")
+        ? bleDevice.id.toUpperCase()
+        : bleDevice.id.replace(/(.{2})(?=.)/g, "$1:").toUpperCase().slice(0, 17);
+      const res = await apiRequest("POST", "/api/devices", {
+        macAddress,
+        name: bleDevice.name || "Unknown BLE Device",
+        signalType: "bluetooth",
+        deviceType: "Unknown",
+        manufacturer: "Unknown",
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+    },
+  });
+
+  const runPhoneScan = useCallback(async () => {
+    setScanStatus("scanning");
+    try {
+      const discovered = await webBluetooth.scanForDevices();
+      if (discovered) {
+        await pushPhoneDevice.mutateAsync({ name: discovered.name, id: discovered.id });
+        setScanCount(prev => prev + 1);
+        setTotalIntercepted(prev => prev + 1);
+        toast({
+          title: "Device Discovered",
+          description: `Found: ${discovered.name}`,
+        });
+      }
+      setScanStatus("complete");
+    } catch (err: any) {
+      setScanStatus("complete");
+    }
+  }, [webBluetooth, pushPhoneDevice, toast]);
 
   const pollHardwareData = useCallback(async () => {
     setScanStatus("scanning");
@@ -296,7 +337,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex rounded-md border border-border/50 overflow-visible" data-testid="data-source-toggle">
             <button
-              className={`px-2.5 py-1 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 ${
+              className={`px-3 py-1.5 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 min-h-[32px] ${
                 dataSource === "hardware"
                   ? "bg-primary text-primary-foreground"
                   : "bg-transparent text-muted-foreground"
@@ -308,8 +349,23 @@ export default function Dashboard() {
               <HardDrive className="w-3 h-3" />
               Hardware
             </button>
+            {webBluetooth.isSupported && (
+              <button
+                className={`px-3 py-1.5 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 min-h-[32px] ${
+                  dataSource === "phone"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-transparent text-muted-foreground"
+                }`}
+                onClick={() => { if (!monitoring) setDataSource("phone"); }}
+                disabled={monitoring}
+                data-testid="button-source-phone"
+              >
+                <Smartphone className="w-3 h-3" />
+                Phone
+              </button>
+            )}
             <button
-              className={`px-2.5 py-1 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 ${
+              className={`px-3 py-1.5 text-[9px] uppercase tracking-wider font-medium transition-colors flex items-center gap-1 min-h-[32px] ${
                 dataSource === "simulation"
                   ? "bg-primary text-primary-foreground"
                   : "bg-transparent text-muted-foreground"
@@ -337,11 +393,21 @@ export default function Dashboard() {
             <Button
               size="sm"
               variant="default"
-              onClick={startMonitoring}
+              onClick={dataSource === "phone" ? runPhoneScan : startMonitoring}
+              disabled={dataSource === "phone" && webBluetooth.isScanning}
               data-testid="button-start-monitor"
             >
-              <Radar className="w-3.5 h-3.5 mr-1.5" />
-              {dataSource === "hardware" ? "Start Hardware Monitor" : "Start Simulation"}
+              {dataSource === "phone" ? (
+                <>
+                  <Bluetooth className="w-3.5 h-3.5 mr-1.5" />
+                  Scan Bluetooth
+                </>
+              ) : (
+                <>
+                  <Radar className="w-3.5 h-3.5 mr-1.5" />
+                  {dataSource === "hardware" ? "Start Hardware Monitor" : "Start Simulation"}
+                </>
+              )}
             </Button>
           )}
           <Button
@@ -360,7 +426,7 @@ export default function Dashboard() {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-16" />
           ))}
@@ -407,11 +473,13 @@ export default function Dashboard() {
           <Card className="flex flex-col overflow-visible gap-3 p-4 relative z-10">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                {monitoring
-                  ? dataSource === "hardware"
-                    ? "Hardware Collector Feed"
-                    : "Intercepted Signals"
-                  : "Sensor Status"
+                {dataSource === "phone"
+                  ? "Phone Bluetooth Scanner"
+                  : monitoring
+                    ? dataSource === "hardware"
+                      ? "Hardware Collector Feed"
+                      : "Intercepted Signals"
+                    : "Sensor Status"
                 }
               </p>
               <div className="flex items-center gap-1.5">
@@ -612,7 +680,81 @@ export default function Dashboard() {
               </div>
             )}
 
-            {!monitoring && (
+            {dataSource === "phone" && (
+              <>
+                <div className="flex flex-col items-center justify-center py-4 gap-2">
+                  <Smartphone className="w-8 h-8 text-primary/60" />
+                  <p className="text-xs text-muted-foreground font-medium">Phone Bluetooth Scanner</p>
+                  <p className="text-[10px] text-muted-foreground text-center max-w-[260px]">
+                    Use your phone's built-in Bluetooth to scan for nearby devices. Tap the button below to open the device picker - each scan discovers one device at a time.
+                  </p>
+                  {webBluetooth.error && (
+                    <p className="text-[10px] text-destructive text-center max-w-[260px]">
+                      {webBluetooth.error}
+                    </p>
+                  )}
+                </div>
+
+                {webBluetooth.devices.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">
+                        Discovered ({webBluetooth.devices.length})
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={webBluetooth.clearDevices}
+                        className="text-[9px]"
+                        data-testid="button-clear-phone-devices"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                    <ScrollArea className="max-h-[280px]">
+                      <div className="flex flex-col gap-1" data-testid="phone-scan-list">
+                        {webBluetooth.devices.map((dev, i) => (
+                          <div
+                            key={dev.id}
+                            className="flex items-center gap-2 p-2 rounded-md border border-primary/20 bg-primary/5 text-xs animate-in fade-in"
+                            data-testid={`phone-device-${i}`}
+                          >
+                            <Bluetooth className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="truncate font-medium text-[11px]">{dev.name}</p>
+                              <p className="text-[9px] text-muted-foreground truncate font-mono">{dev.id}</p>
+                            </div>
+                            <Badge variant="outline" className="text-[8px]">BLE</Badge>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </>
+                )}
+
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={runPhoneScan}
+                  disabled={webBluetooth.isScanning}
+                  className="w-full"
+                  data-testid="button-phone-scan"
+                >
+                  {webBluetooth.isScanning ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Bluetooth className="w-3.5 h-3.5 mr-1.5" />
+                  )}
+                  {webBluetooth.isScanning ? "Scanning..." : "Scan for Bluetooth Devices"}
+                </Button>
+
+                <p className="text-[9px] text-muted-foreground text-center">
+                  {devices.length} node{devices.length !== 1 ? "s" : ""} in database
+                </p>
+              </>
+            )}
+
+            {dataSource !== "phone" && !monitoring && (
               <>
                 <div className="flex flex-col items-center justify-center py-4 gap-2">
                   {dataSource === "hardware" ? (
@@ -694,7 +836,7 @@ export default function Dashboard() {
               </>
             )}
 
-            {monitoring && (
+            {dataSource !== "phone" && monitoring && (
               <Button
                 size="sm"
                 variant="destructive"
