@@ -93,12 +93,11 @@ const SENSOR_SETUP_INFO: Record<string, { description: string; hardware: string[
       "Plug in your RTL-SDR dongle via USB",
       "Install RTL-SDR drivers: sudo apt install rtl-sdr (Linux) or use Zadig (Windows) or brew install librtlsdr (macOS)",
       "Test with: rtl_test -t (should detect your device)",
-      "For remote scanning: start rtl_tcp server on your PC: rtl_tcp -a 0.0.0.0",
-      "In the app's SDR page, connect via 'rtl_tcp Remote' mode with your PC's IP address",
-      "Alternatively, use 'Server-Attached' mode if the SDR is plugged into the server"
+      "Open the SDR page and select 'Server-Attached SDR' mode to begin scanning",
+      "Use 'Simulation' mode to explore the spectrum analyzer without hardware"
     ],
-    connections: ["usb", "network"],
-    tips: "The RTL-SDR V4 is the best starter SDR. For the app's spectrum analyzer, connect via rtl_tcp for real IQ data with FFT processing. Use 'Simulation' mode on the SDR page to explore without hardware. Add an antenna - the included one works, but a discone antenna covers more bands."
+    connections: ["usb"],
+    tips: "The RTL-SDR V4 is the best starter SDR. Connect it via USB and use the app's spectrum analyzer for real-time scanning. Use 'Simulation' mode on the SDR page to explore without hardware. Add an antenna - the included one works, but a discone antenna covers more bands."
   },
   lora: {
     description: "LoRa (Long Range) transceiver for monitoring LoRaWAN IoT sensor networks. Detects environmental sensors, smart agriculture devices, utility meters, and asset trackers.",

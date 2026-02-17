@@ -1,7 +1,5 @@
 import { exec } from "child_process";
 import { promisify } from "util";
-import net from "net";
-import * as fft from "fft-js";
 
 const execAsync = promisify(exec);
 
@@ -31,15 +29,7 @@ export interface SDRScanResult {
   signals: SDRSignal[];
   rawOutput: string;
   error: string | null;
-  source: "server" | "rtl_tcp" | "simulation";
-}
-
-export interface RTLTCPConnection {
-  host: string;
-  port: number;
-  connected: boolean;
-  deviceInfo?: string;
-  error?: string;
+  source: "server" | "simulation";
 }
 
 const KNOWN_FREQUENCIES: Record<string, { label: string; band: string }> = {
@@ -158,248 +148,6 @@ export async function getSDRDevices(): Promise<SDRDevice[]> {
     return devices;
   } catch {
     return [];
-  }
-}
-
-export async function testRTLTCPConnection(host: string, port: number): Promise<RTLTCPConnection> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    let resolved = false;
-    let didConnect = false;
-    const done = (result: RTLTCPConnection) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(result);
-    };
-
-    const timer = setTimeout(() => {
-      done({ host, port, connected: false, error: `Connection timed out after 5s. If using ngrok, make sure you're using the ngrok-assigned port (not 1234).` });
-    }, 5000);
-
-    socket.connect(port, host, () => {
-      didConnect = true;
-      const chunks: Buffer[] = [];
-      socket.on("data", (data) => {
-        chunks.push(data);
-        const combined = Buffer.concat(chunks);
-        if (combined.length >= 12) {
-          const magic = combined.toString("ascii", 0, 4);
-          done({
-            host, port, connected: true,
-            deviceInfo: magic === "RTL0" ? "RTL-SDR via rtl_tcp (verified)" : "rtl_tcp server responding",
-          });
-        }
-      });
-      setTimeout(() => {
-        const totalBytes = chunks.reduce((sum, c) => sum + c.length, 0);
-        if (totalBytes > 0) {
-          done({ host, port, connected: true, deviceInfo: "rtl_tcp server responding (partial handshake)" });
-        } else {
-          done({ host, port, connected: false, deviceInfo: undefined, error: `TCP port ${port} is open on ${host}, but no rtl_tcp data was received. Verify rtl_tcp is actually running on that port.` });
-        }
-      }, 2000);
-    });
-
-    socket.on("error", (err) => {
-      let errorMsg = err.message;
-      if (err.message.includes("ECONNREFUSED")) {
-        errorMsg = `Connection refused at ${host}:${port}. Make sure rtl_tcp is running and the port is correct.`;
-      } else if (err.message.includes("ENOTFOUND")) {
-        errorMsg = `Host "${host}" not found. Check the hostname — enter just the hostname (e.g. 0.tcp.ngrok.io), not a full command.`;
-      } else if (err.message.includes("ETIMEDOUT")) {
-        errorMsg = `Connection timed out to ${host}:${port}. Check your firewall or tunnel setup.`;
-      }
-      done({ host, port, connected: false, error: errorMsg });
-    });
-
-    socket.on("close", () => {
-      if (!didConnect) {
-        done({ host, port, connected: false, error: `Connection to ${host}:${port} was closed before completing. The port may not be running rtl_tcp.` });
-      }
-    });
-  });
-}
-
-function buildRtlTcpCommand(type: number, param: number): Buffer {
-  const buf = Buffer.alloc(5);
-  buf.writeUInt8(type, 0);
-  buf.writeUInt32BE(param, 1);
-  return buf;
-}
-
-const RTL_TCP_CMD = {
-  SET_FREQUENCY: 0x01,
-  SET_SAMPLE_RATE: 0x02,
-  SET_GAIN_MODE: 0x03,
-  SET_GAIN: 0x04,
-  SET_AGC_MODE: 0x08,
-};
-
-function computePowerSpectrum(iqData: Buffer, fftSize: number): number[] {
-  const numSamples = Math.min(Math.floor(iqData.length / 2), fftSize);
-  const input: [number, number][] = [];
-
-  for (let i = 0; i < numSamples; i++) {
-    const iVal = (iqData[i * 2] - 127.5) / 127.5;
-    const qVal = (iqData[i * 2 + 1] - 127.5) / 127.5;
-    input.push([iVal, qVal]);
-  }
-
-  while (input.length < fftSize) {
-    input.push([0, 0]);
-  }
-
-  const spectrum = fft.fft(input);
-  const magnitudes = fft.util.fftMag(spectrum);
-
-  const powerDb: number[] = new Array(fftSize);
-  for (let i = 0; i < fftSize; i++) {
-    const idx = (i + fftSize / 2) % fftSize;
-    const mag = magnitudes[idx] || 1e-10;
-    powerDb[i] = 20 * Math.log10(mag / fftSize);
-  }
-
-  return powerDb;
-}
-
-async function readIQFromRtlTcp(
-  host: string,
-  port: number,
-  centerFreqHz: number,
-  sampleRate: number,
-  numSamples: number,
-  timeoutMs: number = 5000
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const socket = new net.Socket();
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
-    const targetBytes = numSamples * 2;
-
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      if (totalBytes > 0) {
-        resolve(Buffer.concat(chunks));
-      } else {
-        reject(new Error("Timed out waiting for IQ data from rtl_tcp"));
-      }
-    }, timeoutMs);
-
-    socket.connect(port, host, () => {
-      const headerBuf: Buffer[] = [];
-      let headerReceived = false;
-
-      socket.on("data", (data) => {
-        if (!headerReceived) {
-          headerBuf.push(data);
-          const combined = Buffer.concat(headerBuf);
-          if (combined.length >= 12) {
-            headerReceived = true;
-            const remaining = combined.subarray(12);
-            if (remaining.length > 0) {
-              chunks.push(remaining);
-              totalBytes += remaining.length;
-            }
-
-            socket.write(buildRtlTcpCommand(RTL_TCP_CMD.SET_SAMPLE_RATE, sampleRate));
-            socket.write(buildRtlTcpCommand(RTL_TCP_CMD.SET_AGC_MODE, 1));
-            socket.write(buildRtlTcpCommand(RTL_TCP_CMD.SET_FREQUENCY, centerFreqHz));
-          }
-          return;
-        }
-
-        chunks.push(data);
-        totalBytes += data.length;
-
-        if (totalBytes >= targetBytes) {
-          clearTimeout(timeout);
-          socket.destroy();
-          resolve(Buffer.concat(chunks).subarray(0, targetBytes));
-        }
-      });
-    });
-
-    socket.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
-}
-
-export async function scanViaRTLTCP(
-  host: string,
-  port: number,
-  startFreqMHz: number,
-  endFreqMHz: number,
-  _binSizeHz: number = 10000
-): Promise<SDRScanResult> {
-  const startTime = Date.now();
-  const startHz = Math.floor(startFreqMHz * 1e6);
-  const endHz = Math.floor(endFreqMHz * 1e6);
-  const rangeMHz = endFreqMHz - startFreqMHz;
-  const sampleRate = 2400000;
-  const fftSize = 1024;
-  const signals: SDRSignal[] = [];
-
-  try {
-    const conn = await testRTLTCPConnection(host, port);
-    if (!conn.connected) {
-      return {
-        startFreq: startHz, endFreq: endHz, startTime, endTime: Date.now(),
-        signals: [], rawOutput: "", error: `Cannot connect to rtl_tcp at ${host}:${port}: ${conn.error}`,
-        source: "rtl_tcp",
-      };
-    }
-
-    const sampleRateMHz = sampleRate / 1e6;
-    const numSteps = Math.max(1, Math.ceil(rangeMHz / sampleRateMHz));
-    const stepMHz = rangeMHz / numSteps;
-
-    for (let step = 0; step < numSteps; step++) {
-      const centerFreqMHz = startFreqMHz + (step + 0.5) * stepMHz;
-      const centerFreqHz = Math.floor(centerFreqMHz * 1e6);
-
-      try {
-        const iqData = await readIQFromRtlTcp(host, port, centerFreqHz, sampleRate, fftSize * 4, 4000);
-        const powerDb = computePowerSpectrum(iqData, fftSize);
-        const binBandwidthHz = sampleRate / fftSize;
-
-        for (let bin = 0; bin < fftSize; bin++) {
-          const binFreqHz = centerFreqHz - sampleRate / 2 + bin * binBandwidthHz;
-          const binFreqMHz = binFreqHz / 1e6;
-
-          if (binFreqMHz >= startFreqMHz && binFreqMHz <= endFreqMHz) {
-            const id = identifySignal(binFreqMHz);
-            signals.push({
-              frequency: binFreqHz,
-              power: Math.round(powerDb[bin] * 10) / 10,
-              bandwidth: binBandwidthHz,
-              modulation: "unknown",
-              timestamp: Date.now(),
-              label: id?.label,
-            });
-          }
-        }
-      } catch (stepErr: any) {
-        console.warn(`rtl_tcp step ${step} error at ${centerFreqMHz} MHz:`, stepErr.message);
-      }
-    }
-
-    signals.sort((a, b) => a.frequency - b.frequency);
-
-    return {
-      startFreq: startHz, endFreq: endHz, startTime, endTime: Date.now(),
-      signals, rawOutput: `rtl_tcp real scan via ${host}:${port}, ${numSteps} steps, ${signals.length} bins`,
-      error: null, source: "rtl_tcp",
-    };
-  } catch (err: any) {
-    return {
-      startFreq: startHz, endFreq: endHz, startTime, endTime: Date.now(),
-      signals: [], rawOutput: "", error: err.message || "rtl_tcp scan failed",
-      source: "rtl_tcp",
-    };
   }
 }
 
@@ -590,7 +338,7 @@ export async function runPowerScan(
   } catch (err: any) {
     let errorMsg = err.message || "SDR scan failed.";
     if (errorMsg.includes("Command failed") || errorMsg.includes("rtl_power")) {
-      errorMsg = "No USB RTL-SDR device detected on this server. Since your SDR is plugged into your local machine, switch to 'Remote rtl_tcp' mode and use ngrok to tunnel the connection.";
+      errorMsg = "No USB RTL-SDR device detected. Connect an RTL-SDR dongle via USB to enable hardware scanning.";
     }
     return {
       startFreq: startFreqMHz * 1e6,

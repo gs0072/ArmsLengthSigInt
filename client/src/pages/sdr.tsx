@@ -8,9 +8,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Radio, Signal, Play, Square, Pause, RotateCcw, Zap, Wifi, Antenna,
-  MonitorSpeaker, Server, Globe, AlertTriangle, Check, X, Loader2,
+  MonitorSpeaker, AlertTriangle, Check, X, Loader2,
   ChevronDown, ChevronUp, Download, Plus, Info, Crosshair, Activity,
-  Bookmark, Terminal, Link2
+  Bookmark, Link2
 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -43,7 +43,7 @@ interface FreqPreset {
   description: string;
 }
 
-type ConnectionMode = "simulation" | "server" | "rtl_tcp";
+type ConnectionMode = "simulation" | "server";
 
 function SpectrumCanvas({
   signals,
@@ -472,8 +472,6 @@ export default function SDRPage() {
   const [startFreq, setStartFreq] = useState("88");
   const [endFreq, setEndFreq] = useState("108");
   const [mode, setMode] = useState<ConnectionMode>("simulation");
-  const [rtlTcpHost, setRtlTcpHost] = useState("");
-  const [rtlTcpPort, setRtlTcpPort] = useState("1234");
   const [scanning, setScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(false);
   const [scanHistory, setScanHistory] = useState<SDRSignal[][]>([]);
@@ -492,50 +490,13 @@ export default function SDRPage() {
     queryKey: ["/api/sdr/presets"],
   });
 
-  const testConnectionMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/sdr/test-connection", {
-        host: rtlTcpHost,
-        port: parseInt(rtlTcpPort),
-      });
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      if (data.connected) {
-        toast({ title: "Connected", description: `rtl_tcp server at ${rtlTcpHost}:${rtlTcpPort} is responding` });
-      } else {
-        toast({ title: "Connection Failed", description: data.error || "Cannot reach rtl_tcp server", variant: "destructive" });
-      }
-    },
-    onError: () => {
-      toast({ title: "Test Failed", description: "Connection test error", variant: "destructive" });
-    },
-  });
-
   const runScan = useCallback(async () => {
-    if (mode === "rtl_tcp") {
-      if (!rtlTcpHost.trim()) {
-        toast({ title: "Missing Host", description: "Enter your ngrok or public hostname in the rtl_tcp Server section", variant: "destructive" });
-        return;
-      }
-      if (rtlTcpHost.includes("127.0.0.1") || rtlTcpHost.includes("localhost")) {
-        toast({ title: "Invalid Host", description: "127.0.0.1 / localhost refers to this cloud server, not your machine. Use ngrok or your public IP.", variant: "destructive" });
-        return;
-      }
-      const portNum = parseInt(rtlTcpPort);
-      if (!rtlTcpPort.trim() || isNaN(portNum) || portNum < 1 || portNum > 65535) {
-        toast({ title: "Invalid Port", description: "Enter a valid port number (1-65535).", variant: "destructive" });
-        return;
-      }
-    }
     setScanning(true);
     try {
       const res = await apiRequest("POST", "/api/sdr/scan", {
         startFreqMHz: parseFloat(startFreq),
         endFreqMHz: parseFloat(endFreq),
         mode,
-        rtlTcpHost: mode === "rtl_tcp" ? rtlTcpHost : undefined,
-        rtlTcpPort: mode === "rtl_tcp" ? parseInt(rtlTcpPort) : undefined,
       });
       const data: SDRScanResult = await res.json();
 
@@ -565,7 +526,7 @@ export default function SDRPage() {
       toast({ title: "Scan Failed", description: "SDR scan request failed", variant: "destructive" });
     }
     setScanning(false);
-  }, [startFreq, endFreq, mode, rtlTcpHost, rtlTcpPort, toast]);
+  }, [startFreq, endFreq, mode, toast]);
 
   const toggleAutoScan = useCallback(() => {
     if (autoScanRef.current) {
@@ -624,8 +585,8 @@ export default function SDRPage() {
     toast({ title: preset.name, description: `${preset.startMHz} - ${preset.endMHz} MHz: ${preset.description}` });
   };
 
-  const modeLabel = mode === "simulation" ? "Simulation" : mode === "server" ? "Server" : "rtl_tcp";
-  const modeColor = mode === "simulation" ? "hsl(280, 65%, 55%)" : mode === "server" ? "hsl(142, 76%, 48%)" : "hsl(200, 80%, 55%)";
+  const modeLabel = mode === "simulation" ? "Simulation" : "Server";
+  const modeColor = mode === "simulation" ? "hsl(280, 65%, 55%)" : "hsl(142, 76%, 48%)";
 
   return (
     <div className="flex flex-col h-full overflow-hidden" data-testid="page-sdr">
@@ -681,125 +642,13 @@ export default function SDRPage() {
                 <SelectContent>
                   <SelectItem value="simulation">Simulation (Demo Data)</SelectItem>
                   <SelectItem value="server">Server-Attached SDR</SelectItem>
-                  <SelectItem value="rtl_tcp">Remote rtl_tcp</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-[9px] text-muted-foreground">
                 {mode === "simulation" && "Generates realistic RF spectrum data for testing and demo purposes. No hardware required."}
-                {mode === "server" && "Uses an RTL-SDR device attached directly to this server via USB."}
-                {mode === "rtl_tcp" && "Connects to a remote rtl_tcp server. Run rtl_tcp on your Mac/PC to stream SDR data."}
+                {mode === "server" && "Uses an RTL-SDR device attached directly to this machine via USB."}
               </p>
             </Card>
-
-            {mode === "rtl_tcp" && (
-              <Card className="p-3 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-semibold">
-                  <Server className="w-3.5 h-3.5" style={{ color: "hsl(200, 80%, 55%)" }} />
-                  rtl_tcp Server
-                </div>
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded p-2 text-[9px] text-muted-foreground">
-                  Your RTL-SDR is on your local machine, but this app runs in the cloud. You need a tunnel (like ngrok) so the app can reach your rtl_tcp server. Do NOT use 127.0.0.1 — that points to the cloud server.
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    value={rtlTcpHost}
-                    onChange={e => setRtlTcpHost(e.target.value)}
-                    placeholder="e.g. 0.tcp.ngrok.io"
-                    className="text-xs h-8 font-mono flex-1"
-                    data-testid="input-rtltcp-host"
-                  />
-                  <Input
-                    value={rtlTcpPort}
-                    onChange={e => setRtlTcpPort(e.target.value)}
-                    placeholder="e.g. 12345"
-                    className="text-xs h-8 font-mono w-20"
-                    data-testid="input-rtltcp-port"
-                  />
-                </div>
-                <p className="text-[8px] text-muted-foreground/70">
-                  Host = ngrok hostname (e.g. 0.tcp.ngrok.io). Port = ngrok-assigned port (NOT 1234 — ngrok picks a different port).
-                </p>
-                <Button
-                  onClick={() => {
-                    if (!rtlTcpHost.trim()) {
-                      toast({ title: "Missing Host", description: "Enter your ngrok or public hostname first", variant: "destructive" });
-                      return;
-                    }
-                    if (rtlTcpHost.includes("127.0.0.1") || rtlTcpHost.includes("localhost")) {
-                      toast({ title: "Invalid Host", description: "127.0.0.1 / localhost refers to this cloud server, not your machine. Use ngrok or your public IP.", variant: "destructive" });
-                      return;
-                    }
-                    const portNum = parseInt(rtlTcpPort);
-                    if (!rtlTcpPort.trim() || isNaN(portNum) || portNum < 1 || portNum > 65535) {
-                      toast({ title: "Invalid Port", description: "Enter a valid port number (1-65535). Check your ngrok output for the assigned port.", variant: "destructive" });
-                      return;
-                    }
-                    testConnectionMutation.mutate();
-                  }}
-                  disabled={testConnectionMutation.isPending}
-                  variant="outline"
-                  className="w-full text-xs"
-                  data-testid="button-test-rtltcp"
-                >
-                  {testConnectionMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
-                  Test Connection
-                </Button>
-              </Card>
-            )}
-
-            {mode === "rtl_tcp" && (
-              <Card className="p-3 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-semibold">
-                  <Terminal className="w-3.5 h-3.5" style={{ color: "hsl(142, 76%, 48%)" }} />
-                  Setup Guide
-                </div>
-                <div className="text-[10px] text-muted-foreground space-y-2">
-                  <div>
-                    <p className="font-semibold text-foreground/80 mb-0.5">Step 1: Install RTL-SDR tools</p>
-                    <div className="font-mono text-[9px] space-y-0.5 pl-2 border-l border-border">
-                      <p className="text-foreground/60">macOS:</p>
-                      <p>$ brew install librtlsdr</p>
-                      <p className="text-foreground/60 mt-1">Linux:</p>
-                      <p>$ sudo apt install rtl-sdr</p>
-                      <p className="text-foreground/60 mt-1">Windows:</p>
-                      <p>Install Zadig + rtl-sdr drivers</p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-foreground/80 mb-0.5">Step 2: Plug in your RTL-SDR dongle and start rtl_tcp</p>
-                    <div className="font-mono text-[9px] pl-2 border-l border-border">
-                      <p>$ rtl_tcp -a 0.0.0.0 -p 1234</p>
-                      <p className="text-foreground/60 mt-0.5">You should see "Found 1 device(s)" in the output.</p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-foreground/80 mb-0.5">Step 3: Make it reachable from the internet</p>
-                    <p className="text-foreground/60">This app runs in the cloud, so it needs a way to reach your local machine. Use one of:</p>
-                    <div className="font-mono text-[9px] space-y-1 pl-2 border-l border-border mt-1">
-                      <div>
-                        <p className="text-foreground/70 font-sans font-medium">Option A: ngrok (easiest)</p>
-                        <p>$ ngrok tcp 1234</p>
-                        <p className="text-foreground/60">ngrok will show a forwarding line like:</p>
-                        <p className="text-foreground/80">Forwarding tcp://0.tcp.ngrok.io:12345</p>
-                        <p className="text-foreground/60">Enter <strong>0.tcp.ngrok.io</strong> as Host and <strong>12345</strong> as Port above.</p>
-                        <p className="text-foreground/60">Important: The port ngrok assigns (12345) is NOT the same as your local port (1234)!</p>
-                      </div>
-                      <div>
-                        <p className="text-foreground/70 font-sans font-medium">Option B: Port forward</p>
-                        <p className="text-foreground/60">Forward port 1234 on your router to your local IP, then enter your public IP above.</p>
-                      </div>
-                      <div>
-                        <p className="text-foreground/70 font-sans font-medium">Option C: Tailscale / VPN</p>
-                        <p className="text-foreground/60">Use your Tailscale IP as the host if both machines are on the same tailnet.</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-muted/50 rounded p-1.5 text-[9px]">
-                    <p className="text-foreground/70 font-medium">Do NOT use localhost or 127.0.0.1 -- those refer to this cloud server, not your computer.</p>
-                  </div>
-                </div>
-              </Card>
-            )}
 
             {mode === "server" && (
               <Card className="p-3 space-y-2 col-span-2">
@@ -822,13 +671,13 @@ export default function SDRPage() {
                 {!sdrStatus?.toolsInstalled && (
                   <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
                     <AlertTriangle className="w-3 h-3 text-yellow-500 shrink-0 mt-0.5" />
-                    <span>RTL-SDR tools not found on server. For local device scanning, use rtl_tcp mode with your local machine.</span>
+                    <span>RTL-SDR tools not installed. Install rtl-sdr on this machine to enable hardware scanning.</span>
                   </div>
                 )}
                 {sdrStatus?.devicesConnected === 0 && sdrStatus?.toolsInstalled && (
                   <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
                     <AlertTriangle className="w-3 h-3 text-yellow-500 shrink-0 mt-0.5" />
-                    <span>No USB SDR devices detected on server. Connect an RTL-SDR dongle or use rtl_tcp mode for remote devices.</span>
+                    <span>No USB SDR devices detected. Connect an RTL-SDR dongle via USB to begin scanning.</span>
                   </div>
                 )}
               </Card>
@@ -846,8 +695,7 @@ export default function SDRPage() {
                   Signal levels vary realistically between scans. Use this mode to explore the interface and understand signal patterns.
                 </p>
                 <p className="text-[10px] text-muted-foreground">
-                  For real hardware, connect an RTL-SDR device via <strong>rtl_tcp</strong> mode (recommended for Mac/PC) or
-                  attach directly to this server.
+                  For real hardware scanning, switch to Server-Attached mode and connect an RTL-SDR dongle via USB.
                 </p>
               </Card>
             )}

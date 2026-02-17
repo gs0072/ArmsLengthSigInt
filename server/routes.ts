@@ -9,7 +9,7 @@ import OpenAI from "openai";
 import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan, runDiscoveryScan } from "./services/nmap-scanner";
 import { runPassiveScan, lookupOUI, type PassiveSignalHit } from "./services/passive-scanner";
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
-import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, testRTLTCPConnection, scanViaRTLTCP, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
+import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
 import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
 import { matchDeviceToSignature, DEVICE_BROADCAST_SIGNATURES_SERVER } from "./services/signature-matcher";
@@ -1114,9 +1114,7 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
         startFreqMHz: z.number().min(24).max(1766),
         endFreqMHz: z.number().min(24).max(1766),
         binSizeHz: z.number().int().min(1000).max(1000000).default(10000),
-        mode: z.enum(["server", "rtl_tcp", "simulation"]).default("server"),
-        rtlTcpHost: z.string().optional(),
-        rtlTcpPort: z.number().int().min(1).max(65535).optional(),
+        mode: z.enum(["server", "simulation"]).default("server"),
       });
       const parsed = schema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
@@ -1137,14 +1135,6 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
           error: null,
           source: "simulation" as const,
         };
-      } else if (parsed.data.mode === "rtl_tcp" && parsed.data.rtlTcpHost && parsed.data.rtlTcpPort) {
-        result = await scanViaRTLTCP(
-          parsed.data.rtlTcpHost,
-          parsed.data.rtlTcpPort,
-          parsed.data.startFreqMHz,
-          parsed.data.endFreqMHz,
-          parsed.data.binSizeHz
-        );
       } else {
         result = await runPowerScan(parsed.data.startFreqMHz, parsed.data.endFreqMHz, parsed.data.binSizeHz);
       }
@@ -1154,21 +1144,6 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     } catch (error) {
       console.error("Error running SDR scan:", error);
       res.status(500).json({ message: "SDR scan failed" });
-    }
-  });
-
-  app.post("/api/sdr/test-connection", isAuthenticated, async (req: any, res) => {
-    try {
-      const schema = z.object({
-        host: z.string().min(1),
-        port: z.number().int().min(1).max(65535),
-      });
-      const parsed = schema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
-      const result = await testRTLTCPConnection(parsed.data.host, parsed.data.port);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ message: "Connection test failed" });
     }
   });
 
