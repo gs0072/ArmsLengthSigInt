@@ -1,5 +1,6 @@
 import {
   users, devices, observations, alerts, deviceCatalog, userProfiles, activityLog, followingDetection, collectionSensors, deviceAssociations, trustedUsers, osintLinks, customSignatures, collectorApiKeys,
+  sarSessions, sarPings, droneSignatures, droneDetections,
   type User, type UpsertUser,
   type Device, type InsertDevice,
   type Observation, type InsertObservation,
@@ -14,6 +15,10 @@ import {
   type OsintLink, type InsertOsintLink,
   type CustomSignature, type InsertCustomSignature,
   type CollectorApiKey, type InsertCollectorApiKey,
+  type SarSession, type InsertSarSession,
+  type SarPing, type InsertSarPing,
+  type DroneSignature, type InsertDroneSignature,
+  type DroneDetection, type InsertDroneDetection,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
@@ -86,6 +91,23 @@ export interface IStorage {
   deleteCollectorApiKey(id: number): Promise<void>;
   getCollectorApiKeyByKey(apiKey: string): Promise<CollectorApiKey | undefined>;
   updateCollectorApiKeyLastUsed(id: number): Promise<void>;
+
+  getSarSessions(userId: string): Promise<SarSession[]>;
+  getSarSession(id: number): Promise<SarSession | undefined>;
+  createSarSession(session: InsertSarSession): Promise<SarSession>;
+  updateSarSession(id: number, updates: Partial<InsertSarSession>): Promise<SarSession | undefined>;
+  deleteSarSession(id: number): Promise<void>;
+
+  getSarPings(sessionId: number): Promise<SarPing[]>;
+  createSarPing(ping: InsertSarPing): Promise<SarPing>;
+  clearSarPings(sessionId: number): Promise<void>;
+
+  getDroneSignatures(): Promise<DroneSignature[]>;
+  createDroneSignature(sig: InsertDroneSignature): Promise<DroneSignature>;
+
+  getDroneDetections(userId: string): Promise<DroneDetection[]>;
+  createDroneDetection(det: InsertDroneDetection): Promise<DroneDetection>;
+  updateDroneDetection(id: number, updates: Partial<InsertDroneDetection>): Promise<DroneDetection | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -409,6 +431,68 @@ export class DatabaseStorage implements IStorage {
 
   async updateCollectorApiKeyLastUsed(id: number): Promise<void> {
     await db.update(collectorApiKeys).set({ lastUsedAt: new Date() }).where(eq(collectorApiKeys.id, id));
+  }
+
+  async getSarSessions(userId: string): Promise<SarSession[]> {
+    return db.select().from(sarSessions).where(
+      or(eq(sarSessions.ownerId, userId), sql`${userId} = ANY(${sarSessions.participants})`)
+    ).orderBy(desc(sarSessions.createdAt));
+  }
+
+  async getSarSession(id: number): Promise<SarSession | undefined> {
+    const [session] = await db.select().from(sarSessions).where(eq(sarSessions.id, id));
+    return session || undefined;
+  }
+
+  async createSarSession(session: InsertSarSession): Promise<SarSession> {
+    const [created] = await db.insert(sarSessions).values(session).returning();
+    return created;
+  }
+
+  async updateSarSession(id: number, updates: Partial<InsertSarSession>): Promise<SarSession | undefined> {
+    const [updated] = await db.update(sarSessions).set({ ...updates, updatedAt: new Date() }).where(eq(sarSessions.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async deleteSarSession(id: number): Promise<void> {
+    await db.delete(sarPings).where(eq(sarPings.sessionId, id));
+    await db.delete(sarSessions).where(eq(sarSessions.id, id));
+  }
+
+  async getSarPings(sessionId: number): Promise<SarPing[]> {
+    return db.select().from(sarPings).where(eq(sarPings.sessionId, sessionId)).orderBy(desc(sarPings.timestamp));
+  }
+
+  async createSarPing(ping: InsertSarPing): Promise<SarPing> {
+    const [created] = await db.insert(sarPings).values(ping).returning();
+    return created;
+  }
+
+  async clearSarPings(sessionId: number): Promise<void> {
+    await db.delete(sarPings).where(eq(sarPings.sessionId, sessionId));
+  }
+
+  async getDroneSignatures(): Promise<DroneSignature[]> {
+    return db.select().from(droneSignatures);
+  }
+
+  async createDroneSignature(sig: InsertDroneSignature): Promise<DroneSignature> {
+    const [created] = await db.insert(droneSignatures).values(sig).returning();
+    return created;
+  }
+
+  async getDroneDetections(userId: string): Promise<DroneDetection[]> {
+    return db.select().from(droneDetections).where(eq(droneDetections.userId, userId)).orderBy(desc(droneDetections.lastSeenAt));
+  }
+
+  async createDroneDetection(det: InsertDroneDetection): Promise<DroneDetection> {
+    const [created] = await db.insert(droneDetections).values(det).returning();
+    return created;
+  }
+
+  async updateDroneDetection(id: number, updates: Partial<InsertDroneDetection>): Promise<DroneDetection | undefined> {
+    const [updated] = await db.update(droneDetections).set({ ...updates, lastSeenAt: new Date() }).where(eq(droneDetections.id, id)).returning();
+    return updated || undefined;
   }
 }
 

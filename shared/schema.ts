@@ -282,6 +282,78 @@ export const insertCollectorApiKeySchema = createInsertSchema(collectorApiKeys).
 export type CollectorApiKey = typeof collectorApiKeys.$inferSelect;
 export type InsertCollectorApiKey = z.infer<typeof insertCollectorApiKeySchema>;
 
+export const sarSessionStatusEnum = pgEnum("sar_session_status", [
+  "active",
+  "paused",
+  "completed",
+  "cancelled"
+]);
+
+export const sarSessions = pgTable("sar_sessions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  ownerId: varchar("owner_id").notNull(),
+  name: text("name").notNull(),
+  targetDeviceId: integer("target_device_id"),
+  targetLabel: text("target_label"),
+  targetSignalTypes: text("target_signal_types").array(),
+  status: sarSessionStatusEnum("status").notNull().default("active"),
+  searchAreaLat: real("search_area_lat"),
+  searchAreaLon: real("search_area_lon"),
+  searchAreaRadiusM: real("search_area_radius_m"),
+  participants: text("participants").array(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const sarPings = pgTable("sar_pings", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  sessionId: integer("session_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  altitude: real("altitude"),
+  signalStrength: real("signal_strength"),
+  signalType: text("signal_type"),
+  bearing: real("bearing"),
+  notes: text("notes"),
+  timestamp: timestamp("timestamp").defaultNow(),
+});
+
+export const droneSignatures = pgTable("drone_signatures", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  manufacturer: text("manufacturer").notNull(),
+  model: text("model").notNull(),
+  signalType: text("signal_type").notNull(),
+  frequency: text("frequency"),
+  protocol: text("protocol"),
+  identifiers: text("identifiers").array(),
+  description: text("description"),
+  threatLevel: text("threat_level").default("unknown"),
+});
+
+export const droneDetections = pgTable("drone_detections", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  userId: varchar("user_id").notNull(),
+  deviceId: integer("device_id"),
+  signatureId: integer("signature_id"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  altitude: real("altitude"),
+  signalStrength: real("signal_strength"),
+  frequency: real("frequency"),
+  remoteIdData: jsonb("remote_id_data"),
+  flightPath: jsonb("flight_path"),
+  status: text("status").default("active"),
+  firstSeenAt: timestamp("first_seen_at").defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow(),
+});
+
+export const insertSarSessionSchema = createInsertSchema(sarSessions).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertSarPingSchema = createInsertSchema(sarPings).omit({ id: true, timestamp: true });
+export const insertDroneSignatureSchema = createInsertSchema(droneSignatures).omit({ id: true });
+export const insertDroneDetectionSchema = createInsertSchema(droneDetections).omit({ id: true, firstSeenAt: true, lastSeenAt: true });
+
 export const insertTrustedUserSchema = createInsertSchema(trustedUsers).omit({ id: true, addedAt: true });
 export const insertOsintLinkSchema = createInsertSchema(osintLinks).omit({ id: true, createdAt: true });
 export const insertCustomSignatureSchema = createInsertSchema(customSignatures).omit({ id: true, createdAt: true });
@@ -291,3 +363,12 @@ export type OsintLink = typeof osintLinks.$inferSelect;
 export type InsertOsintLink = z.infer<typeof insertOsintLinkSchema>;
 export type CustomSignature = typeof customSignatures.$inferSelect;
 export type InsertCustomSignature = z.infer<typeof insertCustomSignatureSchema>;
+
+export type SarSession = typeof sarSessions.$inferSelect;
+export type InsertSarSession = z.infer<typeof insertSarSessionSchema>;
+export type SarPing = typeof sarPings.$inferSelect;
+export type InsertSarPing = z.infer<typeof insertSarPingSchema>;
+export type DroneSignature = typeof droneSignatures.$inferSelect;
+export type InsertDroneSignature = z.infer<typeof insertDroneSignatureSchema>;
+export type DroneDetection = typeof droneDetections.$inferSelect;
+export type InsertDroneDetection = z.infer<typeof insertDroneDetectionSchema>;

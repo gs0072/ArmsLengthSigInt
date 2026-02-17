@@ -1908,5 +1908,378 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     }
   });
 
+  // ============ SAR (SEARCH AND RESCUE) SESSIONS ============
+  const createSarSessionSchema = z.object({
+    name: z.string().min(1),
+    targetDeviceId: z.number().int().optional(),
+    targetLabel: z.string().optional(),
+    targetSignalTypes: z.array(z.string()).optional(),
+    searchAreaLat: z.number().optional(),
+    searchAreaLon: z.number().optional(),
+    searchAreaRadiusM: z.number().optional(),
+    participants: z.array(z.string()).optional(),
+    notes: z.string().optional(),
+  });
+
+  app.get("/api/sar/sessions", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const sessions = await storage.getSarSessions(userId);
+      res.json(sessions);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch SAR sessions" });
+    }
+  });
+
+  const verifySarAccess = async (userId: string, sessionId: number) => {
+    const session = await storage.getSarSession(sessionId);
+    if (!session) return null;
+    if (session.ownerId === userId) return session;
+    if (session.participants && session.participants.includes(userId)) return session;
+    return null;
+  };
+
+  const updateSarSessionSchema = z.object({
+    name: z.string().min(1).optional(),
+    status: z.enum(["active", "paused", "completed", "cancelled"]).optional(),
+    targetDeviceId: z.number().int().optional(),
+    targetLabel: z.string().optional(),
+    targetSignalTypes: z.array(z.string()).optional(),
+    searchAreaLat: z.number().optional(),
+    searchAreaLon: z.number().optional(),
+    searchAreaRadiusM: z.number().optional(),
+    participants: z.array(z.string()).optional(),
+    notes: z.string().optional(),
+  });
+
+  app.get("/api/sar/sessions/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const session = await verifySarAccess(userId, parseInt(req.params.id));
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+      res.json(session);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch SAR session" });
+    }
+  });
+
+  app.post("/api/sar/sessions", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const parsed = createSarSessionSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid session data", errors: parsed.error.errors });
+      const session = await storage.createSarSession({ ...parsed.data, ownerId: userId });
+      await storage.logActivity(userId, "sar_session_created", `Created SAR session: ${parsed.data.name}`);
+      res.json(session);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create SAR session" });
+    }
+  });
+
+  app.patch("/api/sar/sessions/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const session = await verifySarAccess(userId, parseInt(req.params.id));
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+      if (session.ownerId !== userId) return res.status(403).json({ message: "Only the session owner can modify sessions" });
+      const parsed = updateSarSessionSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid update data", errors: parsed.error.errors });
+      const updated = await storage.updateSarSession(session.id, parsed.data);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update SAR session" });
+    }
+  });
+
+  app.delete("/api/sar/sessions/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const session = await verifySarAccess(userId, parseInt(req.params.id));
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+      if (session.ownerId !== userId) return res.status(403).json({ message: "Only the session owner can delete sessions" });
+      await storage.deleteSarSession(session.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete SAR session" });
+    }
+  });
+
+  // SAR Pings - signal observations from team members
+  const createSarPingSchema = z.object({
+    sessionId: z.number().int(),
+    latitude: z.number(),
+    longitude: z.number(),
+    altitude: z.number().optional(),
+    signalStrength: z.number().optional(),
+    signalType: z.string().optional(),
+    bearing: z.number().optional(),
+    notes: z.string().optional(),
+  });
+
+  app.get("/api/sar/sessions/:id/pings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const session = await verifySarAccess(userId, parseInt(req.params.id));
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+      const pings = await storage.getSarPings(session.id);
+      res.json(pings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch SAR pings" });
+    }
+  });
+
+  app.post("/api/sar/sessions/:id/pings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const session = await verifySarAccess(userId, parseInt(req.params.id));
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+      const parsed = createSarPingSchema.safeParse({ ...req.body, sessionId: session.id });
+      if (!parsed.success) return res.status(400).json({ message: "Invalid ping data", errors: parsed.error.errors });
+      const ping = await storage.createSarPing({ ...parsed.data, userId });
+      res.json(ping);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create SAR ping" });
+    }
+  });
+
+  app.delete("/api/sar/sessions/:id/pings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const session = await verifySarAccess(userId, parseInt(req.params.id));
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+      if (session.ownerId !== userId) return res.status(403).json({ message: "Only the session owner can clear pings" });
+      await storage.clearSarPings(session.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to clear SAR pings" });
+    }
+  });
+
+  // SAR Triangulation - compute position fix from team pings
+  app.get("/api/sar/sessions/:id/triangulate", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const sessionId = parseInt(req.params.id);
+      const session = await verifySarAccess(userId, sessionId);
+      if (!session) return res.status(404).json({ message: "Session not found or access denied" });
+
+      const pings = await storage.getSarPings(sessionId);
+      if (pings.length < 2) {
+        return res.json({ fix: null, message: "Need at least 2 pings from different positions to triangulate" });
+      }
+
+      const sensorObs = pings
+        .filter(p => p.signalStrength != null)
+        .map(p => ({
+          lat: p.latitude,
+          lon: p.longitude,
+          rssi: p.signalStrength!,
+          time: new Date(p.timestamp!).getTime(),
+        }));
+
+      if (sensorObs.length < 2) {
+        return res.json({ fix: null, message: "Need at least 2 pings with signal strength data" });
+      }
+
+      const uniquePositions = new Map<string, typeof sensorObs[0]>();
+      for (const so of sensorObs) {
+        const key = `${so.lat.toFixed(4)},${so.lon.toFixed(4)}`;
+        const existing = uniquePositions.get(key);
+        if (!existing || so.time > existing.time) {
+          uniquePositions.set(key, so);
+        }
+      }
+
+      const positions = Array.from(uniquePositions.values());
+      if (positions.length < 2) {
+        return res.json({ fix: null, message: "Need pings from at least 2 different positions" });
+      }
+
+      const rssiToDistance = (rssi: number) => Math.pow(10, (-40 - rssi) / (10 * 2.7));
+
+      let totalWeight = 0, wLat = 0, wLon = 0;
+      for (const p of positions) {
+        const dist = rssiToDistance(p.rssi);
+        const weight = 1 / Math.max(1, dist);
+        wLat += p.lat * weight;
+        wLon += p.lon * weight;
+        totalWeight += weight;
+      }
+
+      if (totalWeight === 0) {
+        return res.json({ fix: null, message: "Could not compute position fix" });
+      }
+
+      const fixLat = wLat / totalWeight;
+      const fixLon = wLon / totalWeight;
+
+      let maxError = 0;
+      for (const p of positions) {
+        const dLat = (p.lat - fixLat) * 111320;
+        const dLon = (p.lon - fixLon) * 111320 * Math.cos(fixLat * Math.PI / 180);
+        maxError = Math.max(maxError, Math.sqrt(dLat * dLat + dLon * dLon));
+      }
+
+      const heatmapPoints = pings.map(p => ({
+        lat: p.latitude,
+        lon: p.longitude,
+        intensity: p.signalStrength ? Math.max(0, (p.signalStrength + 100) / 60) : 0.3,
+      }));
+
+      const teamPositions = new Map<string, { lat: number; lon: number; time: number }>();
+      for (const p of pings) {
+        const existing = teamPositions.get(p.userId);
+        const time = new Date(p.timestamp!).getTime();
+        if (!existing || time > existing.time) {
+          teamPositions.set(p.userId, { lat: p.latitude, lon: p.longitude, time });
+        }
+      }
+
+      res.json({
+        fix: {
+          latitude: fixLat,
+          longitude: fixLon,
+          errorRadiusM: Math.round(maxError),
+          confidence: Math.min(0.95, positions.length * 0.15 + 0.2),
+          sensorPositions: positions.length,
+          timestamp: Date.now(),
+        },
+        heatmapPoints,
+        teamPositions: Array.from(teamPositions.entries()).map(([userId, pos]) => ({
+          userId,
+          latitude: pos.lat,
+          longitude: pos.lon,
+        })),
+        pingCount: pings.length,
+        targetLabel: session.targetLabel,
+      });
+    } catch (error) {
+      console.error("SAR triangulation error:", error);
+      res.status(500).json({ message: "Triangulation failed" });
+    }
+  });
+
+  // ============ DRONE DETECTION ============
+  app.get("/api/drones/signatures", isAuthenticated, async (_req: any, res) => {
+    try {
+      let sigs = await storage.getDroneSignatures();
+      if (sigs.length === 0) {
+        const defaultSigs = [
+          { manufacturer: "DJI", model: "Mavic Series", signalType: "wifi", frequency: "2.4 GHz / 5.8 GHz", protocol: "OcuSync / Wi-Fi", identifiers: ["DJI-", "Mavic"], description: "DJI Mavic consumer drones using OcuSync or Wi-Fi control link", threatLevel: "low" },
+          { manufacturer: "DJI", model: "Phantom Series", signalType: "wifi", frequency: "2.4 GHz / 5.8 GHz", protocol: "Lightbridge / OcuSync", identifiers: ["DJI-", "Phantom"], description: "DJI Phantom series with Lightbridge or OcuSync", threatLevel: "low" },
+          { manufacturer: "DJI", model: "FPV / Avata", signalType: "wifi", frequency: "2.4 GHz / 5.8 GHz", protocol: "OcuSync 3.0", identifiers: ["DJI-FPV", "DJI-Avata"], description: "DJI FPV racing and Avata cinewhoop drones", threatLevel: "low" },
+          { manufacturer: "DJI", model: "Remote ID Broadcast", signalType: "bluetooth", frequency: "2.4 GHz BLE", protocol: "FAA RemoteID / DJI DroneID", identifiers: ["RID-", "DJI-RID"], description: "FAA-mandated Remote ID Bluetooth broadcast from DJI drones", threatLevel: "info" },
+          { manufacturer: "Skydio", model: "Skydio 2/X2", signalType: "wifi", frequency: "2.4 GHz / 5.8 GHz", protocol: "Wi-Fi Direct", identifiers: ["Skydio", "SKD-"], description: "Skydio autonomous drones with AI obstacle avoidance", threatLevel: "low" },
+          { manufacturer: "Autel", model: "EVO Series", signalType: "wifi", frequency: "2.4 GHz / 5.8 GHz", protocol: "Autel SkyLink", identifiers: ["Autel", "EVO"], description: "Autel EVO series consumer and enterprise drones", threatLevel: "low" },
+          { manufacturer: "Parrot", model: "ANAFI", signalType: "wifi", frequency: "2.4 GHz / 5.8 GHz", protocol: "Wi-Fi", identifiers: ["Parrot", "ANAFI"], description: "Parrot ANAFI series using standard Wi-Fi", threatLevel: "low" },
+          { manufacturer: "Generic", model: "FPV Racing Drone", signalType: "sdr", frequency: "5.8 GHz", protocol: "Analog/Digital FPV", identifiers: ["FPV", "ELRS", "Crossfire"], description: "Custom FPV racing drones using analog or digital video transmitters", threatLevel: "medium" },
+          { manufacturer: "Generic", model: "Remote ID Beacon", signalType: "bluetooth", frequency: "2.4 GHz BLE", protocol: "ASTM F3411 / FAA RemoteID", identifiers: ["RID-", "RemoteID"], description: "Standard Remote ID beacons broadcasting via Bluetooth 5.0", threatLevel: "info" },
+          { manufacturer: "Generic", model: "Unknown UAS", signalType: "sdr", frequency: "900 MHz / 2.4 GHz / 5.8 GHz", protocol: "Unknown", identifiers: [], description: "Unidentified UAS signal on common drone frequencies", threatLevel: "high" },
+          { manufacturer: "Military/Commercial", model: "ISR Platform", signalType: "sdr", frequency: "900 MHz / 1.3 GHz / C-Band", protocol: "Encrypted Link", identifiers: [], description: "Larger ISR/surveillance platform on military/commercial bands", threatLevel: "critical" },
+        ];
+        for (const sig of defaultSigs) {
+          await storage.createDroneSignature(sig);
+        }
+        sigs = await storage.getDroneSignatures();
+      }
+      res.json(sigs);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch drone signatures" });
+    }
+  });
+
+  app.get("/api/drones/detections", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const detections = await storage.getDroneDetections(userId);
+      res.json(detections);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch drone detections" });
+    }
+  });
+
+  const createDroneDetectionSchema = z.object({
+    deviceId: z.number().int().optional(),
+    signatureId: z.number().int().optional(),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    altitude: z.number().optional(),
+    signalStrength: z.number().optional(),
+    frequency: z.number().optional(),
+    remoteIdData: z.record(z.unknown()).optional(),
+    flightPath: z.array(z.object({ lat: z.number(), lon: z.number(), alt: z.number().optional(), time: z.number() })).optional(),
+    status: z.string().optional(),
+  });
+
+  app.post("/api/drones/detections", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const parsed = createDroneDetectionSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid detection data", errors: parsed.error.errors });
+      const detection = await storage.createDroneDetection({ ...parsed.data, userId });
+      await storage.logActivity(userId, "drone_detected", `Drone detection recorded`);
+      res.json(detection);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create drone detection" });
+    }
+  });
+
+  app.patch("/api/drones/detections/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const detection = await storage.updateDroneDetection(parseInt(req.params.id), req.body);
+      if (!detection) return res.status(404).json({ message: "Detection not found" });
+      res.json(detection);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update drone detection" });
+    }
+  });
+
+  // Drone scan simulation - checks existing nodes for drone signatures
+  app.post("/api/drones/scan", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const devices_list = await storage.getDevices(userId);
+      const signatures = await storage.getDroneSignatures();
+
+      const droneMatches: Array<{ device: any; matchedSignature: any; confidence: number }> = [];
+
+      for (const device of devices_list) {
+        for (const sig of signatures) {
+          const identifiers = sig.identifiers || [];
+          const nameMatch = identifiers.some(id =>
+            (device.name && device.name.toLowerCase().includes(id.toLowerCase())) ||
+            (device.manufacturer && device.manufacturer.toLowerCase().includes(id.toLowerCase()))
+          );
+          const typeMatch = device.signalType === sig.signalType;
+
+          if (nameMatch || (typeMatch && device.name && (
+            device.name.toLowerCase().includes("drone") ||
+            device.name.toLowerCase().includes("uav") ||
+            device.name.toLowerCase().includes("uas") ||
+            device.name.toLowerCase().includes("fpv") ||
+            device.name.toLowerCase().includes("dji") ||
+            device.name.toLowerCase().includes("remote id") ||
+            device.name.toLowerCase().includes("rid-")
+          ))) {
+            droneMatches.push({
+              device,
+              matchedSignature: sig,
+              confidence: nameMatch ? 0.85 : 0.5,
+            });
+            break;
+          }
+        }
+      }
+
+      res.json({
+        scannedDevices: devices_list.length,
+        droneMatches,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Drone scan failed" });
+    }
+  });
+
   return httpServer;
 }

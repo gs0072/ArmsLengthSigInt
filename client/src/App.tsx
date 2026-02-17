@@ -23,6 +23,8 @@ import ToolsPage from "@/pages/tools";
 import LinkAnalysisPage from "@/pages/link-analysis";
 import AdminPage from "@/pages/admin";
 import SDRPage from "@/pages/sdr";
+import SARPage from "@/pages/sar";
+import DronesPage from "@/pages/drones";
 import type { Alert, UserProfile, Device } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 
@@ -39,6 +41,8 @@ function AuthenticatedRouter() {
       <Route path="/tools" component={ToolsPage} />
       <Route path="/link-analysis" component={LinkAnalysisPage} />
       <Route path="/sdr" component={SDRPage} />
+      <Route path="/sar" component={SARPage} />
+      <Route path="/drones" component={DronesPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/node-report/:id" component={NodeReportPage} />
