@@ -25,6 +25,7 @@ import AdminPage from "@/pages/admin";
 import SDRPage from "@/pages/sdr";
 import SARPage from "@/pages/sar";
 import DronesPage from "@/pages/drones";
+import DecoderPage from "@/pages/decoder";
 import type { Alert, UserProfile, Device } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 
@@ -43,6 +44,7 @@ function AuthenticatedRouter() {
       <Route path="/sdr" component={SDRPage} />
       <Route path="/sar" component={SARPage} />
       <Route path="/drones" component={DronesPage} />
+      <Route path="/decoder" component={DecoderPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/node-report/:id" component={NodeReportPage} />

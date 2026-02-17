@@ -2281,5 +2281,137 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     }
   });
 
+  // ============================================================
+  // Signal Decoder & Analysis
+  // ============================================================
+  const { KNOWN_FREQUENCY_ALLOCATIONS: FREQ_DB, DIGITAL_MODES, generateSimulatedDecode, identifyByFrequency, identifyByLocation } = await import("./services/signal-decoder");
+
+  app.get("/api/decoder/modes", isAuthenticated, async (_req: any, res) => {
+    res.json(DIGITAL_MODES);
+  });
+
+  app.get("/api/decoder/frequencies", isAuthenticated, async (_req: any, res) => {
+    res.json(FREQ_DB);
+  });
+
+  app.post("/api/decoder/identify", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequencyMHz: z.number(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { frequencyMHz, latitude, longitude } = parsed.data;
+      const identifications = identifyByFrequency(frequencyMHz);
+      const locationTips = latitude !== undefined && longitude !== undefined
+        ? identifyByLocation(frequencyMHz, latitude, longitude)
+        : [];
+
+      res.json({ frequency: frequencyMHz, identifications, locationTips });
+    } catch (error) {
+      res.status(500).json({ message: "Signal identification failed" });
+    }
+  });
+
+  app.post("/api/decoder/decode", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequency: z.number(),
+        decoderType: z.string(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { frequency, decoderType, latitude, longitude } = parsed.data;
+      const decoded = generateSimulatedDecode(decoderType, frequency);
+      const frequencyMHz = frequency / 1e6;
+      const identifications = identifyByFrequency(frequencyMHz);
+      const locationTips = latitude !== undefined && longitude !== undefined
+        ? identifyByLocation(frequencyMHz, latitude, longitude)
+        : [];
+
+      res.json({ decoded, identifications, locationTips });
+    } catch (error) {
+      res.status(500).json({ message: "Signal decoding failed" });
+    }
+  });
+
+  app.post("/api/decoder/analyze", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequency: z.number(),
+        decoderType: z.string().optional(),
+        decodedContent: z.string().optional(),
+        signalType: z.string().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        modulation: z.string().optional(),
+        power: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { frequency, decoderType, decodedContent, signalType, latitude, longitude, modulation, power } = parsed.data;
+      const frequencyMHz = frequency / 1e6;
+      const identifications = identifyByFrequency(frequencyMHz);
+      const locationTips = latitude !== undefined && longitude !== undefined
+        ? identifyByLocation(frequencyMHz, latitude, longitude)
+        : [];
+
+      const openai = new OpenAI();
+      const prompt = `You are an expert RF/SIGINT analyst. Analyze this intercepted signal and provide intelligence assessment.
+
+Signal Parameters:
+- Frequency: ${frequencyMHz.toFixed(6)} MHz (${frequency} Hz)
+- Modulation: ${modulation || "Unknown"}
+- Signal Type: ${signalType || "Unknown"}
+- Decoder Used: ${decoderType || "None"}
+- Power Level: ${power !== undefined ? power + " dBm" : "Unknown"}
+${latitude !== undefined ? `- Location: ${latitude.toFixed(4)}, ${longitude?.toFixed(4)}` : ""}
+
+${identifications.length > 0 ? `Known Frequency Allocations at this frequency:\n${identifications.map(id => `- ${id.name} (${id.category}): ${id.description}`).join("\n")}` : "No known frequency allocations match."}
+
+${decodedContent ? `Decoded Content:\n${decodedContent}` : "No decoded content available."}
+
+${locationTips.length > 0 ? `Location-specific notes:\n${locationTips.map(t => `- ${t}`).join("\n")}` : ""}
+
+Provide analysis covering:
+1. **Signal Identification**: What is this signal most likely? Consider frequency, modulation, and any decoded content.
+2. **Source Assessment**: Who/what is likely transmitting? (Government, commercial, amateur, military, emergency, IoT, etc.)
+3. **Intelligence Value**: What information can be extracted? Rate: Low/Medium/High/Critical.
+4. **Operational Context**: What does this signal tell us about activity in the area?
+5. **Recommended Actions**: What should the operator do next? (Monitor, decode, record, report, ignore)
+6. **Legal Considerations**: Any legal restrictions on monitoring/decoding this signal?
+7. **Technical Notes**: Additional technical details about the signal characteristics.
+
+Format your response clearly with headers. Be specific and actionable.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1500,
+        temperature: 0.3,
+      });
+
+      const analysis = completion.choices[0]?.message?.content || "Analysis unavailable.";
+
+      res.json({
+        analysis,
+        frequency: frequencyMHz,
+        identifications,
+        locationTips,
+      });
+    } catch (error: any) {
+      console.error("AI signal analysis failed:", error);
+      res.status(500).json({ message: "AI signal analysis failed", error: error.message });
+    }
+  });
+
   return httpServer;
 }
+
