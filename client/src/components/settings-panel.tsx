@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2, UserPlus, Mail, ExternalLink, Layers } from "lucide-react";
+import { Settings, Database, Users, Shield, Radio, Globe, HardDrive, Crown, Bluetooth, Wifi, Cpu, Antenna, Satellite, CircuitBoard, Thermometer, Radar, Trash2, AlertTriangle, Check, X, Plus, Loader2, UserPlus, Mail, ExternalLink, Layers, Code, Smartphone, Monitor, CheckCircle2, XCircle, MapPin } from "lucide-react";
 import { GlowLine } from "./scan-animation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -37,6 +37,123 @@ const OSINT_DATA_SOURCES = [
   { name: "APRS-IS", desc: "Amateur radio APRS position reports", url: "https://aprs.fi", type: "sdr" },
   { name: "HaveIBeenPwned", desc: "Breach data for device/email cross-ref", url: "https://haveibeenpwned.com", type: "osint" },
 ];
+
+function DeveloperModeSection() {
+  const { toast } = useToast();
+  const { data: profile } = useQuery<UserProfile>({
+    queryKey: ["/api/profile"],
+  });
+
+  const developerMode = (profile?.settings as any)?.developerMode === true;
+
+  const hasWebBluetooth = typeof navigator !== "undefined" && "bluetooth" in navigator;
+  const hasGPS = typeof navigator !== "undefined" && "geolocation" in navigator;
+  const isMobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const isSecureContext = typeof window !== "undefined" && window.isSecureContext;
+  const browserName = typeof navigator !== "undefined"
+    ? /Chrome/.test(navigator.userAgent) ? "Chrome"
+      : /Firefox/.test(navigator.userAgent) ? "Firefox"
+      : /Safari/.test(navigator.userAgent) ? "Safari"
+      : "Other"
+    : "Unknown";
+
+  const toggleDeveloperMode = useMutation({
+    mutationFn: async () => {
+      const currentSettings = (profile?.settings as any) || {};
+      const newSettings = { ...currentSettings, developerMode: !developerMode };
+      return apiRequest("PATCH", "/api/profile", { settings: newSettings });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+      toast({
+        title: developerMode ? "Developer Mode Disabled" : "Developer Mode Enabled",
+        description: developerMode
+          ? "Hardware diagnostics hidden from Dashboard."
+          : "Hardware capability diagnostics now visible on Dashboard.",
+      });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update developer mode.", variant: "destructive" });
+    },
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Code className="w-3.5 h-3.5 text-muted-foreground" />
+        <h4 className="text-xs font-medium">Developer Mode</h4>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Enable developer mode to see hardware capability diagnostics on the Dashboard and access advanced scanning features.
+      </p>
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs">Developer Mode</Label>
+        <Switch
+          checked={developerMode}
+          onCheckedChange={() => toggleDeveloperMode.mutate()}
+          data-testid="switch-developer-mode"
+        />
+      </div>
+
+      <div className="space-y-1.5 pt-1">
+        <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">Hardware Status</p>
+        <div className="grid grid-cols-1 gap-1">
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <Bluetooth className="w-3 h-3" style={{ color: "hsl(217, 91%, 60%)" }} />
+              <span className="text-muted-foreground">Web Bluetooth API</span>
+            </div>
+            {hasWebBluetooth ? (
+              <Badge variant="outline" className="text-[7px]" style={{ color: "hsl(142, 76%, 48%)", borderColor: "hsl(142, 76%, 48%)" }}>Available</Badge>
+            ) : (
+              <Badge variant="outline" className="text-[7px] opacity-50">Not Available</Badge>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <MapPin className="w-3 h-3 text-primary" />
+              <span className="text-muted-foreground">GPS / Geolocation</span>
+            </div>
+            {hasGPS ? (
+              <Badge variant="outline" className="text-[7px]" style={{ color: "hsl(142, 76%, 48%)", borderColor: "hsl(142, 76%, 48%)" }}>Available</Badge>
+            ) : (
+              <Badge variant="outline" className="text-[7px] opacity-50">Not Available</Badge>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              {isMobile ? (
+                <Smartphone className="w-3 h-3 text-primary" />
+              ) : (
+                <Monitor className="w-3 h-3 text-muted-foreground" />
+              )}
+              <span className="text-muted-foreground">Platform</span>
+            </div>
+            <Badge variant="outline" className="text-[7px]">
+              {isMobile ? "Mobile" : "Desktop"} / {browserName}
+            </Badge>
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <Shield className="w-3 h-3 text-muted-foreground" />
+              <span className="text-muted-foreground">Secure Context (HTTPS)</span>
+            </div>
+            {isSecureContext ? (
+              <Badge variant="outline" className="text-[7px]" style={{ color: "hsl(142, 76%, 48%)", borderColor: "hsl(142, 76%, 48%)" }}>Yes</Badge>
+            ) : (
+              <Badge variant="outline" className="text-[7px] opacity-50">No</Badge>
+            )}
+          </div>
+        </div>
+        {!hasWebBluetooth && (
+          <p className="text-[9px] text-muted-foreground mt-1">
+            Web Bluetooth requires Chrome on Android or a Chromium-based browser with HTTPS. Safari and Firefox do not support Web Bluetooth.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storageLimit, userTier }: SettingsPanelProps) {
   const [showNotifications, setShowNotifications] = useState(true);
@@ -553,6 +670,10 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             <Switch checked={followingDetection} onCheckedChange={setFollowingDetection} data-testid="switch-following" />
           </div>
         </div>
+
+        <GlowLine />
+
+        <DeveloperModeSection />
 
         <GlowLine />
 

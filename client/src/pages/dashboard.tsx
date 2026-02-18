@@ -10,17 +10,55 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite, Thermometer, Radar, RefreshCw, Square, Signal } from "lucide-react";
-import type { Device, Observation, Alert, CollectionSensor } from "@shared/schema";
+import { useWebBluetooth, type ScannedBluetoothDevice } from "@/hooks/use-web-bluetooth";
+import {
+  Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite,
+  Thermometer, Radar, RefreshCw, Square, MapPin, Loader2,
+  Smartphone, Monitor, CheckCircle2, XCircle
+} from "lucide-react";
+import type { Device, Observation, Alert, CollectionSensor, UserProfile } from "@shared/schema";
+
+interface GPSPosition {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: number;
+}
+
+interface BLEScanEntry {
+  name: string;
+  bleId: string;
+  rssi: number | null;
+  savedDeviceId: number | null;
+  timestamp: number;
+}
 
 export default function Dashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [monitoring, setMonitoring] = useState(false);
   const [monitorStartTime, setMonitorStartTime] = useState<number | null>(null);
-  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [gpsPosition, setGpsPosition] = useState<GPSPosition | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [bleScanLog, setBleScanLog] = useState<BLEScanEntry[]>([]);
+  const [savingDevice, setSavingDevice] = useState(false);
+  const gpsWatchRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const webBluetooth = useWebBluetooth();
+
+  const hasWebBluetooth = webBluetooth.isSupported;
+  const hasGPS = typeof navigator !== "undefined" && "geolocation" in navigator;
+  const isMobileDevice = typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  const { data: profile } = useQuery<UserProfile>({
+    queryKey: ["/api/profile"],
+  });
+
+  const developerMode = (profile?.settings as any)?.developerMode === true;
 
   const { data: devices = [], isLoading: devicesLoading } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
@@ -62,18 +100,117 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/sensors"] }),
   });
 
-  const startMonitoring = useCallback(() => {
-    if (activeSensors.length === 0 && sensors.length === 0) {
-      toast({
-        title: "No Sensors Configured",
-        description: "Add sensors from the Sensors page to begin collecting real signals.",
-        variant: "destructive",
-      });
-      return;
-    }
+  const startGPSTracking = useCallback(() => {
+    if (!hasGPS) return;
+    setGpsLoading(true);
+    setGpsError(null);
 
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setGpsPosition({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: position.timestamp,
+        });
+        setGpsLoading(false);
+      },
+      (err) => {
+        setGpsError(err.message);
+        setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+    gpsWatchRef.current = watchId;
+  }, [hasGPS]);
+
+  const stopGPSTracking = useCallback(() => {
+    if (gpsWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(gpsWatchRef.current);
+      gpsWatchRef.current = null;
+    }
+  }, []);
+
+  const saveDeviceToBackend = useCallback(async (bleDevice: ScannedBluetoothDevice) => {
+    setSavingDevice(true);
+    try {
+      const macPlaceholder = `BLE:${bleDevice.id.substring(0, 17).toUpperCase()}`;
+
+      const deviceData: any = {
+        name: bleDevice.name,
+        macAddress: macPlaceholder,
+        signalType: "bluetooth",
+        deviceType: "BLE Device",
+        manufacturer: "Unknown",
+        notes: `Discovered via Web Bluetooth scan. BLE ID: ${bleDevice.id}. Services: ${bleDevice.services.length > 0 ? bleDevice.services.join(", ") : "None detected"}.`,
+      };
+
+      const res = await apiRequest("POST", "/api/devices", deviceData);
+      const savedDevice = await res.json();
+
+      const obsData: any = {
+        deviceId: savedDevice.id,
+        signalType: "bluetooth",
+        signalStrength: bleDevice.rssi ?? -70,
+        protocol: "BLE",
+        encryption: "Unknown",
+      };
+
+      if (gpsPosition) {
+        obsData.latitude = gpsPosition.latitude;
+        obsData.longitude = gpsPosition.longitude;
+      }
+
+      await apiRequest("POST", "/api/observations", obsData);
+
+      setBleScanLog(prev => [{
+        name: bleDevice.name,
+        bleId: bleDevice.id,
+        rssi: bleDevice.rssi,
+        savedDeviceId: savedDevice.id,
+        timestamp: Date.now(),
+      }, ...prev].slice(0, 50));
+
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/observations"] });
+
+      toast({
+        title: "Device Saved",
+        description: `${bleDevice.name} added to your node database${gpsPosition ? " with GPS location" : ""}.`,
+      });
+
+      return savedDevice.id;
+    } catch (err: any) {
+      if (err?.message?.includes("duplicate") || err?.message?.includes("already exists")) {
+        toast({
+          title: "Device Already Exists",
+          description: `${bleDevice.name} is already in your database.`,
+        });
+      } else {
+        toast({
+          title: "Save Failed",
+          description: err.message || "Could not save the device.",
+          variant: "destructive",
+        });
+      }
+      return null;
+    } finally {
+      setSavingDevice(false);
+    }
+  }, [gpsPosition, queryClient, toast]);
+
+  const handleBLEScan = useCallback(async () => {
+    const device = await webBluetooth.scanForDevices();
+    if (device) {
+      await saveDeviceToBackend(device);
+    }
+  }, [webBluetooth, saveDeviceToBackend]);
+
+  const startMonitoring = useCallback(() => {
     setMonitoring(true);
     setMonitorStartTime(Date.now());
+
+    startGPSTracking();
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
@@ -81,17 +218,15 @@ export default function Dashboard() {
 
     toast({
       title: "Monitoring Active",
-      description: `${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""} now collecting. Real signals will appear as they are detected.`,
+      description: hasWebBluetooth
+        ? "Use 'Scan BLE' to discover nearby Bluetooth devices. GPS is tracking your location."
+        : `${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""} now collecting.`,
     });
-  }, [activeSensors, sensors, toast, updateSensorStatus]);
+  }, [activeSensors, toast, updateSensorStatus, startGPSTracking, hasWebBluetooth]);
 
   const stopMonitoring = useCallback(() => {
     setMonitoring(false);
-
-    if (refreshTimerRef.current) {
-      clearInterval(refreshTimerRef.current);
-      refreshTimerRef.current = null;
-    }
+    stopGPSTracking();
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
@@ -100,18 +235,15 @@ export default function Dashboard() {
     const elapsed = monitorStartTime ? Math.round((Date.now() - monitorStartTime) / 1000) : 0;
     toast({
       title: "Monitoring Stopped",
-      description: `Session ran for ${elapsed}s with ${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""}.`,
+      description: `Session ran for ${elapsed}s. ${bleScanLog.length} device${bleScanLog.length !== 1 ? "s" : ""} discovered via BLE.`,
     });
-  }, [activeSensors, monitorStartTime, toast, updateSensorStatus]);
+  }, [activeSensors, monitorStartTime, bleScanLog.length, toast, updateSensorStatus, stopGPSTracking]);
 
   useEffect(() => {
     return () => {
-      if (refreshTimerRef.current) {
-        clearInterval(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
+      stopGPSTracking();
     };
-  }, []);
+  }, [stopGPSTracking]);
 
   const toggleTrack = useMutation({
     mutationFn: async (id: number) => {
@@ -142,9 +274,17 @@ export default function Dashboard() {
           <Badge variant="outline" className="text-[9px] uppercase">
             {devices.length} Nodes
           </Badge>
-          <Badge variant="outline" className="text-[9px] uppercase">
-            {activeSensors.length} / {sensors.length} Sensors Active
-          </Badge>
+          {hasWebBluetooth && (
+            <Badge variant="outline" className="text-[9px] uppercase">
+              <Bluetooth className="w-2.5 h-2.5 mr-1" />
+              BLE Ready
+            </Badge>
+          )}
+          {sensors.length > 0 && (
+            <Badge variant="outline" className="text-[9px] uppercase">
+              {activeSensors.length} / {sensors.length} Sensors
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {monitoring ? (
@@ -155,7 +295,7 @@ export default function Dashboard() {
               data-testid="button-stop-monitor"
             >
               <Square className="w-3.5 h-3.5 mr-1.5" />
-              Stop Monitoring
+              Stop
             </Button>
           ) : (
             <Button
@@ -166,6 +306,22 @@ export default function Dashboard() {
             >
               <Radar className="w-3.5 h-3.5 mr-1.5" />
               Start Monitoring
+            </Button>
+          )}
+          {monitoring && hasWebBluetooth && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={handleBLEScan}
+              disabled={webBluetooth.isScanning || savingDevice}
+              data-testid="button-ble-scan"
+            >
+              {webBluetooth.isScanning || savingDevice ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Bluetooth className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Scan BLE
             </Button>
           )}
           <Button
@@ -230,7 +386,7 @@ export default function Dashboard() {
           <Card className="flex flex-col overflow-visible gap-3 p-4 relative z-10">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                {monitoring ? "Monitoring Active" : "Sensor Status"}
+                {monitoring ? "Monitoring Active" : "Device Scanner"}
               </p>
               <div className="flex items-center gap-1.5">
                 {monitoring && (
@@ -243,16 +399,99 @@ export default function Dashboard() {
 
             {monitoring && (
               <div className="flex flex-col gap-3">
-                <div className="flex flex-col items-center justify-center py-4 gap-2">
-                  <ScanPulse active={true} size={50} />
-                  <p className="text-xs font-medium">Sensors Collecting</p>
-                  <p className="text-[10px] text-muted-foreground text-center max-w-[260px]">
-                    {activeSensors.length} sensor{activeSensors.length !== 1 ? "s" : ""} actively collecting real signals. New nodes appear automatically as they are detected.
-                  </p>
+                <div className="flex items-center gap-2 p-2 rounded-md border border-border/30 text-xs">
+                  <MapPin className="w-3.5 h-3.5 shrink-0 text-primary" />
+                  <div className="flex-1 min-w-0">
+                    {gpsLoading && <span className="text-muted-foreground">Acquiring GPS...</span>}
+                    {gpsError && <span className="text-destructive truncate">GPS: {gpsError}</span>}
+                    {gpsPosition && !gpsLoading && (
+                      <span className="text-muted-foreground font-mono text-[10px] truncate">
+                        {gpsPosition.latitude.toFixed(6)}, {gpsPosition.longitude.toFixed(6)}
+                        <span className="ml-1 opacity-60">({Math.round(gpsPosition.accuracy)}m)</span>
+                      </span>
+                    )}
+                    {!gpsPosition && !gpsLoading && !gpsError && (
+                      <span className="text-muted-foreground">GPS not available</span>
+                    )}
+                  </div>
+                  {gpsPosition && (
+                    <Badge variant="outline" className="text-[7px] uppercase shrink-0">
+                      <CheckCircle2 className="w-2 h-2 mr-0.5" /> Fix
+                    </Badge>
+                  )}
                 </div>
+
+                {hasWebBluetooth && (
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={handleBLEScan}
+                      disabled={webBluetooth.isScanning || savingDevice}
+                      className="w-full"
+                      data-testid="button-ble-scan-panel"
+                    >
+                      {webBluetooth.isScanning || savingDevice ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Bluetooth className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      {webBluetooth.isScanning ? "Scanning..." : savingDevice ? "Saving..." : "Scan for BLE Devices"}
+                    </Button>
+
+                    {webBluetooth.error && (
+                      <p className="text-[10px] text-destructive">{webBluetooth.error}</p>
+                    )}
+
+                    <p className="text-[9px] text-muted-foreground text-center">
+                      Your browser will show a device picker. Select a device to add it to your database{gpsPosition ? " with GPS location" : ""}.
+                    </p>
+                  </div>
+                )}
+
+                {!hasWebBluetooth && (
+                  <div className="flex flex-col items-center py-2 gap-1">
+                    <p className="text-[10px] text-muted-foreground text-center">
+                      Web Bluetooth is not available in this browser. Use Chrome on Android for direct BLE scanning, or connect external sensors.
+                    </p>
+                  </div>
+                )}
+
+                {bleScanLog.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                      Discovered ({bleScanLog.length})
+                    </p>
+                    <ScrollArea className="max-h-[200px]">
+                      <div className="flex flex-col gap-1" data-testid="ble-scan-log">
+                        {bleScanLog.map((entry, i) => (
+                          <div
+                            key={`${entry.bleId}-${i}`}
+                            className="flex items-center gap-2 p-2 rounded-md border border-primary/30 bg-primary/5 text-xs cursor-pointer animate-in fade-in slide-in-from-top-1 duration-300"
+                            onClick={() => entry.savedDeviceId && setSelectedDeviceId(entry.savedDeviceId)}
+                            data-testid={`ble-discovered-${i}`}
+                          >
+                            <Bluetooth className="w-3 h-3 shrink-0" style={{ color: sensorTypeColors.bluetooth }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="truncate font-medium text-[11px]">{entry.name}</p>
+                              <p className="text-[9px] text-muted-foreground truncate font-mono">{entry.bleId}</p>
+                            </div>
+                            {entry.rssi !== null && (
+                              <span className="text-[10px] font-mono tabular-nums shrink-0" style={{ color: sensorTypeColors.bluetooth }}>
+                                {entry.rssi} dBm
+                              </span>
+                            )}
+                            <Badge variant="outline" className="text-[7px] uppercase shrink-0">Saved</Badge>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
 
                 {sensors.length > 0 && (
                   <div className="flex flex-col gap-1.5">
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Sensors</p>
                     {sensors.map(sensor => {
                       const SIcon = sensorTypeIcons[sensor.sensorType] || Radar;
                       const color = sensorTypeColors[sensor.sensorType] || "hsl(200, 20%, 50%)";
@@ -290,14 +529,53 @@ export default function Dashboard() {
               <>
                 <div className="flex flex-col items-center justify-center py-4 gap-2">
                   <ScanPulse active={false} size={50} />
-                  <p className="text-xs text-muted-foreground font-medium">Ready to Monitor</p>
+                  <p className="text-xs text-muted-foreground font-medium">Ready to Scan</p>
                   <p className="text-[10px] text-muted-foreground text-center max-w-[260px]">
-                    Start monitoring to activate your sensors and collect real wireless signals from nearby devices.
+                    {hasWebBluetooth
+                      ? "Start monitoring to scan for nearby Bluetooth devices using your phone's hardware. Detected devices are saved with GPS location."
+                      : "Start monitoring to activate sensors and collect real wireless signals from nearby devices."
+                    }
                   </p>
                   <p className="text-[10px] text-muted-foreground">
                     {devices.length} node{devices.length !== 1 ? "s" : ""} in database
                   </p>
                 </div>
+
+                {developerMode && (
+                  <div className="flex flex-col gap-2 p-3 rounded-md border border-border/30 bg-muted/5">
+                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Hardware Capabilities</p>
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                      <div className="flex items-center gap-1.5">
+                        {hasWebBluetooth ? (
+                          <CheckCircle2 className="w-3 h-3 text-green-500" />
+                        ) : (
+                          <XCircle className="w-3 h-3 text-destructive" />
+                        )}
+                        <span className="text-muted-foreground">Web Bluetooth</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {hasGPS ? (
+                          <CheckCircle2 className="w-3 h-3 text-green-500" />
+                        ) : (
+                          <XCircle className="w-3 h-3 text-destructive" />
+                        )}
+                        <span className="text-muted-foreground">GPS / Location</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {isMobileDevice ? (
+                          <Smartphone className="w-3 h-3 text-primary" />
+                        ) : (
+                          <Monitor className="w-3 h-3 text-muted-foreground" />
+                        )}
+                        <span className="text-muted-foreground">{isMobileDevice ? "Mobile" : "Desktop"}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Bluetooth className="w-3 h-3" style={{ color: sensorTypeColors.bluetooth }} />
+                        <span className="text-muted-foreground">{webBluetooth.devices.length} scanned</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {sensors.length > 0 && (
                   <div className="flex flex-col gap-3 w-full">
@@ -321,14 +599,6 @@ export default function Dashboard() {
                         );
                       })}
                     </div>
-                  </div>
-                )}
-
-                {sensors.length === 0 && (
-                  <div className="flex flex-col items-center py-2 gap-1">
-                    <p className="text-[10px] text-muted-foreground text-center">
-                      No sensors configured yet. Add sensors to start collecting real signals.
-                    </p>
                   </div>
                 )}
 
