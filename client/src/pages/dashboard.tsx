@@ -16,9 +16,22 @@ import { useWebBluetooth, type ScannedBluetoothDevice } from "@/hooks/use-web-bl
 import {
   Bluetooth, Radio, Antenna, Wifi, CircuitBoard, Satellite,
   Thermometer, Radar, RefreshCw, Square, MapPin, Loader2,
-  Smartphone, Monitor, CheckCircle2, XCircle
+  Smartphone, Monitor, CheckCircle2, XCircle, Server
 } from "lucide-react";
 import type { Device, Observation, Alert, CollectionSensor, UserProfile } from "@shared/schema";
+
+interface ScannerStatus {
+  bleAvailable: boolean;
+  bleScanning: boolean;
+  wifiAvailable: boolean;
+  wifiMonitorMode: boolean;
+  sdrAvailable: boolean;
+  gpsAvailable: boolean;
+  gpsPosition: GPSPosition | null;
+  lastScanTime: number | null;
+  totalDevicesFound: number;
+  scanCount: number;
+}
 
 interface GPSPosition {
   latitude: number;
@@ -77,6 +90,29 @@ export default function Dashboard() {
   const { data: sensors = [] } = useQuery<CollectionSensor[]>({
     queryKey: ["/api/sensors"],
     refetchInterval: monitoring ? 5000 : false,
+  });
+
+  const { data: scannerStatus } = useQuery<ScannerStatus>({
+    queryKey: ["/api/scanner/status"],
+    refetchInterval: monitoring ? 5000 : false,
+  });
+
+  const linuxScannerHasHardware = scannerStatus?.bleAvailable || scannerStatus?.wifiAvailable || scannerStatus?.sdrAvailable;
+
+  const startLinuxScannerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/scanner/start");
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/scanner/status"] }),
+  });
+
+  const stopLinuxScannerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/scanner/stop");
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/scanner/status"] }),
   });
 
   const sensorTypeIcons: Record<string, any> = {
@@ -212,21 +248,34 @@ export default function Dashboard() {
 
     startGPSTracking();
 
+    if (linuxScannerHasHardware) {
+      startLinuxScannerMutation.mutate();
+    }
+
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "collecting" });
     }
 
+    const capabilities: string[] = [];
+    if (hasWebBluetooth) capabilities.push("Web BLE");
+    if (linuxScannerHasHardware) capabilities.push("Linux Scanner");
+    if (activeSensors.length > 0) capabilities.push(`${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""}`);
+
     toast({
       title: "Monitoring Active",
-      description: hasWebBluetooth
-        ? "Use 'Scan BLE' to discover nearby Bluetooth devices. GPS is tracking your location."
-        : `${activeSensors.length} sensor${activeSensors.length !== 1 ? "s" : ""} now collecting.`,
+      description: capabilities.length > 0
+        ? `Active: ${capabilities.join(", ")}. GPS tracking enabled.`
+        : "GPS tracking enabled. Use 'Scan BLE' to discover nearby devices.",
     });
-  }, [activeSensors, toast, updateSensorStatus, startGPSTracking, hasWebBluetooth]);
+  }, [activeSensors, toast, updateSensorStatus, startGPSTracking, hasWebBluetooth, linuxScannerHasHardware, startLinuxScannerMutation]);
 
   const stopMonitoring = useCallback(() => {
     setMonitoring(false);
     stopGPSTracking();
+
+    if (linuxScannerHasHardware) {
+      stopLinuxScannerMutation.mutate();
+    }
 
     for (const sensor of activeSensors) {
       updateSensorStatus.mutate({ id: sensor.id, status: "idle" });
@@ -235,9 +284,9 @@ export default function Dashboard() {
     const elapsed = monitorStartTime ? Math.round((Date.now() - monitorStartTime) / 1000) : 0;
     toast({
       title: "Monitoring Stopped",
-      description: `Session ran for ${elapsed}s. ${bleScanLog.length} device${bleScanLog.length !== 1 ? "s" : ""} discovered via BLE.`,
+      description: `Session ran for ${elapsed}s. ${bleScanLog.length} BLE device${bleScanLog.length !== 1 ? "s" : ""} discovered. ${scannerStatus?.totalDevicesFound || 0} via Linux scanner.`,
     });
-  }, [activeSensors, monitorStartTime, bleScanLog.length, toast, updateSensorStatus, stopGPSTracking]);
+  }, [activeSensors, monitorStartTime, bleScanLog.length, toast, updateSensorStatus, stopGPSTracking, linuxScannerHasHardware, stopLinuxScannerMutation, scannerStatus]);
 
   useEffect(() => {
     return () => {
@@ -420,6 +469,29 @@ export default function Dashboard() {
                     </Badge>
                   )}
                 </div>
+
+                {linuxScannerHasHardware && scannerStatus && (
+                  <div className="flex items-center gap-2 p-2 rounded-md border border-border/30 text-xs">
+                    <Server className="w-3.5 h-3.5 shrink-0 text-primary" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-muted-foreground text-[10px]">
+                        Linux Scanner: {scannerStatus.scanCount > 0 ? `${scannerStatus.scanCount} cycles` : "starting..."}
+                        {scannerStatus.totalDevicesFound > 0 && ` / ${scannerStatus.totalDevicesFound} found`}
+                      </span>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {scannerStatus.bleAvailable && (
+                        <Badge variant="outline" className="text-[7px] uppercase">BLE</Badge>
+                      )}
+                      {scannerStatus.wifiAvailable && (
+                        <Badge variant="outline" className="text-[7px] uppercase">WiFi</Badge>
+                      )}
+                      {scannerStatus.sdrAvailable && (
+                        <Badge variant="outline" className="text-[7px] uppercase">SDR</Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {hasWebBluetooth && (
                   <div className="flex flex-col gap-2">

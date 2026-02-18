@@ -155,6 +155,143 @@ function DeveloperModeSection() {
   );
 }
 
+interface NodeInfo {
+  nodeId: string;
+  nodeName: string;
+  platform: string;
+  role: string;
+  syncEnabled: boolean;
+  syncTargetUrl: string;
+  scanner: {
+    bleAvailable: boolean;
+    wifiAvailable: boolean;
+    sdrAvailable: boolean;
+    gpsAvailable: boolean;
+    bleScanning: boolean;
+    lastScanTime: number | null;
+    totalDevicesFound: number;
+    scanCount: number;
+  };
+  networkAddresses: string[];
+  tools: string[];
+}
+
+function NodeSyncSection() {
+  const { toast } = useToast();
+
+  const { data: nodeInfo, isLoading } = useQuery<NodeInfo>({
+    queryKey: ["/api/system/node-info"],
+    refetchInterval: 10000,
+  });
+
+  if (isLoading || !nodeInfo) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Radio className="w-3.5 h-3.5 text-muted-foreground" />
+          <h4 className="text-xs font-medium">Collection Node</h4>
+        </div>
+        <p className="text-[10px] text-muted-foreground">Loading node info...</p>
+      </div>
+    );
+  }
+
+  const ipAddress = nodeInfo.networkAddresses.length > 0
+    ? nodeInfo.networkAddresses[0].replace(/\s*\(.*\)/, "")
+    : "localhost";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Radio className="w-3.5 h-3.5 text-muted-foreground" />
+          <h4 className="text-xs font-medium">Collection Node</h4>
+        </div>
+        <Badge variant="outline" className="text-[8px] uppercase" data-testid="badge-node-role">{nodeInfo.role}</Badge>
+      </div>
+
+      <div className="flex flex-col gap-1.5 text-[10px]">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground">Node ID</span>
+          <span className="font-mono text-[9px] truncate max-w-[180px]" data-testid="text-node-id">{nodeInfo.nodeId}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground">Hostname</span>
+          <span className="font-mono text-[9px]">{nodeInfo.nodeName}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground">Platform</span>
+          <span className="font-mono text-[9px]">{nodeInfo.platform}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground">Access URL</span>
+          <span className="font-mono text-[9px] text-primary">http://{ipAddress}:5000</span>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">Linux Scanner</p>
+        <div className="grid grid-cols-2 gap-1 text-[10px]">
+          <div className="flex items-center gap-1.5">
+            {nodeInfo.scanner.bleAvailable ? (
+              <CheckCircle2 className="w-3 h-3 text-green-500" />
+            ) : (
+              <XCircle className="w-3 h-3 text-muted-foreground opacity-50" />
+            )}
+            <span className="text-muted-foreground">Bluetooth (hcitool)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {nodeInfo.scanner.wifiAvailable ? (
+              <CheckCircle2 className="w-3 h-3 text-green-500" />
+            ) : (
+              <XCircle className="w-3 h-3 text-muted-foreground opacity-50" />
+            )}
+            <span className="text-muted-foreground">WiFi (iwconfig)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {nodeInfo.scanner.sdrAvailable ? (
+              <CheckCircle2 className="w-3 h-3 text-green-500" />
+            ) : (
+              <XCircle className="w-3 h-3 text-muted-foreground opacity-50" />
+            )}
+            <span className="text-muted-foreground">SDR (rtl_sdr)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {nodeInfo.scanner.gpsAvailable ? (
+              <CheckCircle2 className="w-3 h-3 text-green-500" />
+            ) : (
+              <XCircle className="w-3 h-3 text-muted-foreground opacity-50" />
+            )}
+            <span className="text-muted-foreground">GPS (gpsd)</span>
+          </div>
+        </div>
+        {nodeInfo.scanner.scanCount > 0 && (
+          <div className="text-[9px] text-muted-foreground">
+            {nodeInfo.scanner.scanCount} scan cycles completed, {nodeInfo.scanner.totalDevicesFound} devices found
+          </div>
+        )}
+      </div>
+
+      {nodeInfo.tools.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">Installed Tools</p>
+          <div className="flex flex-wrap gap-1">
+            {nodeInfo.tools.map(tool => (
+              <Badge key={tool} variant="outline" className="text-[7px]">{tool}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="p-2 rounded-md bg-primary/5 border border-primary/20">
+        <p className="text-[9px] text-muted-foreground">
+          <span className="text-primary font-medium">Multi-Node:</span> Clone and install SIGINT Hub on multiple Linux boxes or Raspberry Pis. Each node collects with its own hardware, then syncs data via the /api/sync endpoints. Monitor all nodes from any phone on the network.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storageLimit, userTier }: SettingsPanelProps) {
   const [showNotifications, setShowNotifications] = useState(true);
   const [followingDetection, setFollowingDetection] = useState(true);
@@ -653,6 +790,10 @@ export function SettingsPanel({ dataMode, onDataModeChange, storageUsed, storage
             )}
           </div>
         </div>
+
+        <GlowLine />
+
+        <NodeSyncSection />
 
         <GlowLine />
 

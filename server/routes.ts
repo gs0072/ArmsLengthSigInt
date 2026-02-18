@@ -10,6 +10,7 @@ import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickS
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
+import { getNodeConfig, getScannerStatus, startLinuxScanner, stopLinuxScanner, setDeviceCallback, runManualScan, type ScannedBLEDevice, type ScannedWiFiDevice } from "./services/linux-scanner";
 import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
 import { matchDeviceToSignature, DEVICE_BROADCAST_SIGNATURES_SERVER } from "./services/signature-matcher";
 import { getTierFeatures, isFeatureAllowed, isDataModeAllowed, TIER_FEATURES, FEATURE_LABELS } from "../shared/tier-features";
@@ -700,6 +701,262 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     } catch (error) {
       console.error("Error getting system info:", error);
       res.status(500).json({ message: "Failed to get system info" });
+    }
+  });
+
+  // ============ NODE IDENTITY & LINUX SCANNER ============
+  app.get("/api/system/node-info", isAuthenticated, async (_req: any, res) => {
+    try {
+      const config = getNodeConfig();
+      const status = getScannerStatus();
+      const capabilities = await getSystemCapabilities();
+      const networkAddresses = capabilities.networkInterfaces
+        .filter(i => !i.internal)
+        .flatMap(i => i.addresses.filter(a => a.includes("IPv4")));
+
+      res.json({
+        nodeId: config.nodeId,
+        nodeName: config.nodeName,
+        platform: config.platform,
+        role: config.role,
+        createdAt: config.createdAt,
+        syncEnabled: config.syncEnabled,
+        syncTargetUrl: config.syncTargetUrl,
+        scanner: status,
+        system: capabilities.system,
+        networkAddresses,
+        tools: capabilities.tools.filter(t => t.installed).map(t => t.name),
+      });
+    } catch (error) {
+      console.error("Error getting node info:", error);
+      res.status(500).json({ message: "Failed to get node info" });
+    }
+  });
+
+  app.get("/api/scanner/status", isAuthenticated, async (_req: any, res) => {
+    try {
+      const status = getScannerStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get scanner status" });
+    }
+  });
+
+  app.post("/api/scanner/start", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+
+      setDeviceCallback(async (device, type, gps) => {
+        try {
+          const mac = (device as ScannedBLEDevice).macAddress || (device as ScannedWiFiDevice).macAddress;
+          const existing = await storage.getDevices(userId);
+          const alreadyExists = existing.some(d => d.macAddress === mac);
+          if (alreadyExists) return;
+
+          const name = type === "bluetooth"
+            ? (device as ScannedBLEDevice).name
+            : (device as ScannedWiFiDevice).ssid;
+
+          const nodeConfig = getNodeConfig();
+          const newDevice = await storage.createDevice({
+            userId,
+            name,
+            macAddress: mac,
+            signalType: type,
+            deviceType: type === "bluetooth" ? "BLE Device" : "WiFi AP",
+            manufacturer: type === "bluetooth" ? (device as ScannedBLEDevice).manufacturer : "Unknown",
+            notes: `Auto-discovered by Linux scanner on node ${nodeConfig.nodeId}.`,
+            metadata: { collectorNodeId: nodeConfig.nodeId },
+          });
+
+          const obsData: any = {
+            deviceId: newDevice.id,
+            userId,
+            signalType: type,
+            signalStrength: type === "bluetooth"
+              ? (device as ScannedBLEDevice).rssi
+              : (device as ScannedWiFiDevice).rssi,
+            protocol: type === "bluetooth" ? "BLE" : "802.11",
+          };
+
+          if (type === "wifi") {
+            obsData.channel = (device as ScannedWiFiDevice).channel;
+            obsData.frequency = (device as ScannedWiFiDevice).frequency;
+            obsData.encryption = (device as ScannedWiFiDevice).encryption;
+          }
+
+          if (gps) {
+            obsData.latitude = gps.latitude;
+            obsData.longitude = gps.longitude;
+            obsData.altitude = gps.altitude;
+            obsData.heading = gps.heading;
+            obsData.speed = gps.speed;
+          }
+
+          await storage.createObservation(obsData);
+        } catch (err: any) {
+          if (!err?.message?.includes("duplicate")) {
+            console.error("[scanner] Failed to save device:", err.message);
+          }
+        }
+      });
+
+      await startLinuxScanner();
+      res.json({ message: "Scanner started", status: getScannerStatus() });
+    } catch (error) {
+      console.error("Error starting scanner:", error);
+      res.status(500).json({ message: "Failed to start scanner" });
+    }
+  });
+
+  app.post("/api/scanner/stop", isAuthenticated, async (_req: any, res) => {
+    try {
+      stopLinuxScanner();
+      res.json({ message: "Scanner stopped", status: getScannerStatus() });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to stop scanner" });
+    }
+  });
+
+  app.post("/api/scanner/manual-scan", isAuthenticated, async (req: any, res) => {
+    try {
+      const result = await runManualScan();
+      res.json(result);
+    } catch (error) {
+      console.error("Error running manual scan:", error);
+      res.status(500).json({ message: "Failed to run manual scan" });
+    }
+  });
+
+  // ============ DATA SYNC (MULTI-NODE) ============
+  app.post("/api/sync/push", async (req: any, res) => {
+    try {
+      const syncSecret = req.headers["x-sync-secret"] || req.headers["authorization"]?.replace("Bearer ", "");
+      const expectedSecret = process.env.SYNC_SECRET;
+
+      if (expectedSecret && syncSecret !== expectedSecret) {
+        return res.status(401).json({ message: "Invalid sync secret. Set the SYNC_SECRET environment variable on both nodes to enable sync." });
+      }
+
+      const schema = z.object({
+        sourceNodeId: z.string().min(1).max(128),
+        devices: z.array(z.object({
+          name: z.string().max(256).nullable().optional(),
+          macAddress: z.string().max(64).nullable().optional(),
+          signalType: z.string().max(32),
+          deviceType: z.string().max(128).nullable().optional(),
+          manufacturer: z.string().max(128).nullable().optional(),
+          notes: z.string().max(1024).nullable().optional(),
+          metadata: z.any().nullable().optional(),
+        })).max(500),
+        observations: z.array(z.object({
+          localDeviceId: z.number(),
+          signalType: z.string().max(32),
+          signalStrength: z.number().nullable().optional(),
+          latitude: z.number().nullable().optional(),
+          longitude: z.number().nullable().optional(),
+          altitude: z.number().nullable().optional(),
+          frequency: z.number().nullable().optional(),
+          channel: z.number().nullable().optional(),
+          protocol: z.string().max(64).nullable().optional(),
+          encryption: z.string().max(64).nullable().optional(),
+        })).max(5000),
+      });
+
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid sync payload", errors: parsed.error.issues });
+
+      const { sourceNodeId, devices: syncDevices, observations: syncObs } = parsed.data;
+
+      const systemUserId = `sync-${sourceNodeId}`;
+
+      const deviceIdMap = new Map<number, number>();
+      let devicesCreated = 0;
+      let observationsCreated = 0;
+
+      for (let i = 0; i < syncDevices.length; i++) {
+        const d = syncDevices[i];
+        try {
+          const existingDevices = await storage.getDevices(systemUserId);
+          const existing = existingDevices.find(e => e.macAddress === d.macAddress);
+
+          if (existing) {
+            deviceIdMap.set(i, existing.id);
+          } else {
+            const created = await storage.createDevice({
+              userId: systemUserId,
+              name: d.name || null,
+              macAddress: d.macAddress || null,
+              signalType: d.signalType as any,
+              deviceType: d.deviceType || null,
+              manufacturer: d.manufacturer || null,
+              notes: `Synced from node ${sourceNodeId}. ${d.notes || ""}`.trim(),
+              metadata: { ...(d.metadata || {}), sourceNodeId },
+            });
+            deviceIdMap.set(i, created.id);
+            devicesCreated++;
+          }
+        } catch (err: any) {
+          console.error(`[sync] Error saving device ${i}:`, err.message);
+        }
+      }
+
+      for (const obs of syncObs) {
+        const mappedDeviceId = deviceIdMap.get(obs.localDeviceId);
+        if (!mappedDeviceId) continue;
+
+        try {
+          await storage.createObservation({
+            deviceId: mappedDeviceId,
+            userId: systemUserId,
+            signalType: obs.signalType as any,
+            signalStrength: obs.signalStrength ?? null,
+            latitude: obs.latitude ?? null,
+            longitude: obs.longitude ?? null,
+            altitude: obs.altitude ?? null,
+            frequency: obs.frequency ?? null,
+            channel: obs.channel ?? null,
+            protocol: obs.protocol ?? null,
+            encryption: obs.encryption ?? null,
+          });
+          observationsCreated++;
+        } catch (err: any) {
+          console.error(`[sync] Error saving observation:`, err.message);
+        }
+      }
+
+      res.json({
+        message: "Sync complete",
+        sourceNodeId,
+        devicesCreated,
+        observationsCreated,
+        totalDevicesMapped: deviceIdMap.size,
+      });
+    } catch (error) {
+      console.error("Error processing sync push:", error);
+      res.status(500).json({ message: "Failed to process sync data" });
+    }
+  });
+
+  app.get("/api/sync/pull", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const since = req.query.since ? new Date(req.query.since as string) : new Date(0);
+
+      const allDevices = await storage.getDevices(userId);
+      const allObs = await storage.getObservations(userId);
+
+      const nodeConfig = getNodeConfig();
+
+      res.json({
+        nodeId: nodeConfig.nodeId,
+        devices: allDevices,
+        observations: allObs.filter(o => new Date(o.observedAt!) >= since),
+        exportedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error pulling sync data:", error);
+      res.status(500).json({ message: "Failed to pull sync data" });
     }
   });
 
