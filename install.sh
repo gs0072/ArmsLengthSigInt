@@ -36,7 +36,7 @@ check_command() {
     fi
 }
 
-echo -e "${BOLD}[1/6] Checking prerequisites...${NC}"
+echo -e "${BOLD}[1/7] Checking prerequisites...${NC}"
 echo ""
 
 NODE_OK=true
@@ -63,7 +63,7 @@ if [ "$NODE_VERSION" -lt 18 ]; then
 fi
 
 echo ""
-echo -e "${BOLD}[2/6] Checking SIGINT tools (optional)...${NC}"
+echo -e "${BOLD}[2/7] Checking SIGINT tools (optional)...${NC}"
 echo ""
 check_command hcitool || true
 check_command bluetoothctl || true
@@ -84,11 +84,21 @@ echo "  sudo apt-get install -y rtl-sdr librtlsdr-dev"
 echo "  sudo apt-get install -y aircrack-ng iw wireless-tools"
 echo ""
 
-echo -e "${BOLD}[3/6] Installing Node.js dependencies...${NC}"
+echo -e "${BOLD}[3/7] Fixing package.json for standard npm...${NC}"
+if grep -q 'npm:tsx@' package.json 2>/dev/null; then
+    sed -i 's/npm:tsx@[^"]*/^4.20.4/' package.json
+    echo -e "  ${GREEN}Fixed npm:tsx alias for standard npm compatibility${NC}"
+else
+    echo -e "  ${GREEN}No fix needed${NC}"
+fi
+echo ""
+
+echo -e "${BOLD}[4/7] Installing Node.js dependencies...${NC}"
+npm install -g tsx 2>/dev/null || true
 npm install
 
 echo ""
-echo -e "${BOLD}[4/6] Generating node identity...${NC}"
+echo -e "${BOLD}[5/7] Generating node identity...${NC}"
 
 NODE_CONFIG_FILE=".sigint-node.json"
 if [ -f "$NODE_CONFIG_FILE" ]; then
@@ -121,26 +131,47 @@ EOF
 fi
 
 echo ""
-echo -e "${BOLD}[5/6] Setting up database...${NC}"
+echo -e "${BOLD}[6/7] Setting up database...${NC}"
 
 if [ -z "$DATABASE_URL" ]; then
-    echo -e "${YELLOW}DATABASE_URL not set. You have two options:${NC}"
+    echo -e "${YELLOW}DATABASE_URL not set.${NC}"
     echo ""
-    echo "  Option A: Use PostgreSQL locally"
-    echo "    export DATABASE_URL=postgresql://user:pass@localhost:5432/armslength_sigint"
+    echo "  Before running this installer, you should have PostgreSQL set up:"
     echo ""
-    echo "  Option B: Use SQLite (coming soon)"
+    echo "  1. Start PostgreSQL:"
+    echo "     sudo service postgresql start"
     echo ""
-    echo "  Then re-run: npm run db:push"
+    echo "  2. Create the database:"
+    echo "     sudo -u postgres psql -c \"CREATE USER sigint WITH PASSWORD 'sigint123';\""
+    echo "     sudo -u postgres psql -c \"CREATE DATABASE armslength_sigint OWNER sigint;\""
     echo ""
+    echo "  3. Set the DATABASE_URL (pick your shell):"
+    echo ""
+
+    SHELL_NAME=$(basename "$SHELL")
+    if [ "$SHELL_NAME" = "zsh" ]; then
+        RC_FILE="$HOME/.zshrc"
+        echo "     Detected: zsh"
+        echo "     echo 'export DATABASE_URL=\"postgresql://sigint:sigint123@localhost:5432/armslength_sigint\"' >> ~/.zshrc"
+        echo "     source ~/.zshrc"
+    else
+        RC_FILE="$HOME/.bashrc"
+        echo "     Detected: bash"
+        echo "     echo 'export DATABASE_URL=\"postgresql://sigint:sigint123@localhost:5432/armslength_sigint\"' >> ~/.bashrc"
+        echo "     source ~/.bashrc"
+    fi
+    echo ""
+    echo "  4. Then re-run: ./install.sh"
+    echo ""
+    exit 1
 else
     echo -e "  ${GREEN}DATABASE_URL is set${NC}"
     echo "  Running database migrations..."
-    npm run db:push 2>/dev/null || npm run db:push --force 2>/dev/null || echo -e "  ${YELLOW}Database push had warnings (may be OK if tables exist)${NC}"
+    npx drizzle-kit push 2>/dev/null || npx drizzle-kit push --force 2>/dev/null || echo -e "  ${YELLOW}Database push had warnings (may be OK if tables exist)${NC}"
 fi
 
 echo ""
-echo -e "${BOLD}[6/6] Setup complete!${NC}"
+echo -e "${BOLD}[7/7] Setup complete!${NC}"
 echo ""
 echo -e "${CYAN}${BOLD}Quick Start:${NC}"
 echo ""
@@ -152,6 +183,11 @@ echo -e "    ${CYAN}http://localhost:5000${NC}"
 echo -e "    ${CYAN}http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo '<your-ip>'):5000${NC}"
 echo ""
 echo "  Access from your phone on the same network using the IP address above."
+echo ""
+echo -e "${CYAN}${BOLD}Standalone Mode:${NC}"
+echo ""
+echo "  When running outside Replit, authentication is automatic."
+echo "  No login required - you're auto-signed in as the local operator."
 echo ""
 echo -e "${CYAN}${BOLD}Linux Scanner:${NC}"
 echo ""

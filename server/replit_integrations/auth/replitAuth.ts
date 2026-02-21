@@ -6,7 +6,16 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
+import crypto from "crypto";
+import os from "os";
 import { authStorage } from "./storage";
+
+const STANDALONE_USER_ID = "local-admin";
+const STANDALONE_USER_EMAIL = "admin@localhost";
+
+export function isStandaloneMode(): boolean {
+  return !process.env.REPL_ID;
+}
 
 const getOidcConfig = memoize(
   async () => {
@@ -27,14 +36,17 @@ export function getSession() {
     ttl: sessionTtl,
     tableName: "sessions",
   });
+  const sessionSecret = isStandaloneMode()
+    ? (process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"))
+    : process.env.SESSION_SECRET!;
   return session({
-    secret: process.env.SESSION_SECRET!,
+    secret: sessionSecret,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: true,
+      secure: !isStandaloneMode(),
       maxAge: sessionTtl,
     },
   });
@@ -60,7 +72,59 @@ async function upsertUser(claims: any) {
   });
 }
 
-export async function setupAuth(app: Express) {
+async function ensureLocalAdmin() {
+  try {
+    const hostname = os.hostname();
+    await authStorage.upsertUser({
+      id: STANDALONE_USER_ID,
+      email: STANDALONE_USER_EMAIL,
+      firstName: hostname,
+      lastName: "Operator",
+      profileImageUrl: null,
+    });
+    console.log(`[auth] Standalone mode: local admin user ready (${hostname} Operator)`);
+  } catch (error) {
+    console.error("[auth] Failed to create local admin user:", error);
+  }
+}
+
+async function setupStandaloneAuth(app: Express) {
+  app.set("trust proxy", 1);
+  app.use(getSession());
+
+  await ensureLocalAdmin();
+
+  app.use((req: any, _res, next) => {
+    if (!req.user) {
+      req.user = {
+        claims: {
+          sub: STANDALONE_USER_ID,
+          email: STANDALONE_USER_EMAIL,
+          exp: Math.floor(Date.now() / 1000) + 86400 * 365,
+        },
+        expires_at: Math.floor(Date.now() / 1000) + 86400 * 365,
+      };
+      req.isAuthenticated = () => true;
+    }
+    next();
+  });
+
+  app.get("/api/login", (_req, res) => {
+    res.redirect("/");
+  });
+
+  app.get("/api/callback", (_req, res) => {
+    res.redirect("/");
+  });
+
+  app.get("/api/logout", (_req, res) => {
+    res.redirect("/");
+  });
+
+  console.log("[auth] Running in standalone mode - no login required");
+}
+
+async function setupReplitAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
@@ -78,10 +142,8 @@ export async function setupAuth(app: Express) {
     verified(null, user);
   };
 
-  // Keep track of registered strategies
   const registeredStrategies = new Set<string>();
 
-  // Helper function to ensure strategy exists for a domain
   const ensureStrategy = (domain: string) => {
     const strategyName = `replitauth:${domain}`;
     if (!registeredStrategies.has(strategyName)) {
@@ -130,7 +192,31 @@ export async function setupAuth(app: Express) {
   });
 }
 
+export async function setupAuth(app: Express) {
+  if (isStandaloneMode()) {
+    await setupStandaloneAuth(app);
+  } else {
+    await setupReplitAuth(app);
+  }
+}
+
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
+  if (isStandaloneMode()) {
+    const reqAny = req as any;
+    if (!reqAny.user) {
+      reqAny.user = {
+        claims: {
+          sub: STANDALONE_USER_ID,
+          email: STANDALONE_USER_EMAIL,
+          exp: Math.floor(Date.now() / 1000) + 86400 * 365,
+        },
+        expires_at: Math.floor(Date.now() / 1000) + 86400 * 365,
+      };
+      reqAny.isAuthenticated = () => true;
+    }
+    return next();
+  }
+
   const user = req.user as any;
 
   if (!req.isAuthenticated() || !user.expires_at) {
