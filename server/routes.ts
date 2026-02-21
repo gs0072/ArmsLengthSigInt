@@ -1,7 +1,10 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import { setupAuth, registerAuthRoutes, isAuthenticated as replitIsAuthenticated } from "./replit_integrations/auth";
+import type { RequestHandler } from "express";
+
+let isAuthenticated: RequestHandler = replitIsAuthenticated;
 import { z } from "zod";
 import crypto from "crypto";
 import { type CollectorApiKey } from "@shared/schema";
@@ -81,8 +84,84 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  await setupAuth(app);
-  registerAuthRoutes(app);
+  const isStandalone = !process.env.REPL_ID;
+
+  try {
+    await setupAuth(app);
+    registerAuthRoutes(app);
+  } catch (error) {
+    if (isStandalone) {
+      console.log("[routes] Replit Auth unavailable - setting up standalone mode");
+      const session = await import("express-session");
+      const crypto = await import("crypto");
+      const connectPg = (await import("connect-pg-simple")).default;
+      const os = await import("os");
+
+      const pgStore = connectPg(session.default);
+      const sessionStore = new pgStore({
+        conString: process.env.DATABASE_URL,
+        createTableIfMissing: true,
+        ttl: 7 * 24 * 60 * 60,
+        tableName: "sessions",
+      });
+
+      app.use(session.default({
+        secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+        store: sessionStore,
+        resave: false,
+        saveUninitialized: false,
+        cookie: { httpOnly: true, secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 },
+      }));
+
+      const localUserId = "local-admin";
+      const localEmail = "admin@localhost";
+      const hostname = os.hostname();
+
+      try {
+        await storage.upsertUser({ id: localUserId, email: localEmail, firstName: hostname, lastName: "Operator", profileImageUrl: null });
+      } catch (e) {
+        console.error("[routes] Could not create local admin user:", e);
+      }
+
+      app.use((req: any, _res: any, next: any) => {
+        if (!req.user) {
+          req.user = {
+            claims: { sub: localUserId, email: localEmail, exp: Math.floor(Date.now() / 1000) + 86400 * 365 },
+            expires_at: Math.floor(Date.now() / 1000) + 86400 * 365,
+          };
+          req.isAuthenticated = () => true;
+        }
+        next();
+      });
+
+      app.get("/api/login", (_req: any, res: any) => res.redirect("/"));
+      app.get("/api/callback", (_req: any, res: any) => res.redirect("/"));
+      app.get("/api/logout", (_req: any, res: any) => res.redirect("/"));
+      app.get("/api/auth/user", async (req: any, res: any) => {
+        try {
+          const user = await storage.getUser(localUserId);
+          res.json(user);
+        } catch (e) {
+          res.json({ id: localUserId, email: localEmail, firstName: hostname, lastName: "Operator" });
+        }
+      });
+
+      isAuthenticated = ((req: any, _res: any, next: any) => {
+        if (!req.user) {
+          req.user = {
+            claims: { sub: localUserId, email: localEmail, exp: Math.floor(Date.now() / 1000) + 86400 * 365 },
+            expires_at: Math.floor(Date.now() / 1000) + 86400 * 365,
+          };
+          req.isAuthenticated = () => true;
+        }
+        next();
+      }) as RequestHandler;
+
+      console.log(`[routes] Standalone mode active - auto-signed in as ${hostname} Operator`);
+    } else {
+      throw error;
+    }
+  }
 
   
 
