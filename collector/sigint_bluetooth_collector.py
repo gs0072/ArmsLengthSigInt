@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SIGINT Hub - Bluetooth Collector
-=================================
+ArmsLength SigInt - Bluetooth Collector
+========================================
 Scans nearby Bluetooth and BLE devices using your system's Bluetooth adapter
-and pushes discovered devices to your SIGINT Hub cloud instance.
+and pushes discovered devices to your ArmsLength SigInt instance.
 
 Supported Platforms:
   - macOS 12+ (uses bleak library with CoreBluetooth)
@@ -20,7 +20,7 @@ Requirements:
     (System Settings > Privacy & Security > Bluetooth)
 
 Usage:
-  1. Generate a Collector API Key in SIGINT Hub Settings
+  1. Generate a Collector API Key in ArmsLength SigInt Settings
   2. Run: python3 sigint_bluetooth_collector.py --key YOUR_KEY --url https://your-app.replit.app
 """
 
@@ -369,9 +369,9 @@ def print_banner():
 """)
 
 def main():
-    parser = argparse.ArgumentParser(description="SIGINT Hub Bluetooth Collector")
+    parser = argparse.ArgumentParser(description="ArmsLength SigInt Bluetooth Collector")
     parser.add_argument("--key", help="Collector API key")
-    parser.add_argument("--url", help="SIGINT Hub URL")
+    parser.add_argument("--url", help="ArmsLength SigInt URL")
     parser.add_argument("--interval", type=int, default=SCAN_INTERVAL, help="Scan interval in seconds")
     parser.add_argument("--lat", type=float, help="Your latitude")
     parser.add_argument("--lng", type=float, help="Your longitude")

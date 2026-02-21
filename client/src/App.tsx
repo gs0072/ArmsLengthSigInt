@@ -79,7 +79,7 @@ function AuthenticatedApp() {
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex-1" />
             <div className="text-[9px] text-muted-foreground uppercase tracking-widest font-mono">
-              SIGINT Hub v1.0
+              ArmsLength SigInt v1.0
             </div>
           </header>
           <main className="flex-1 overflow-hidden">

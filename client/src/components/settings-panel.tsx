@@ -285,7 +285,7 @@ function NodeSyncSection() {
 
       <div className="p-2 rounded-md bg-primary/5 border border-primary/20">
         <p className="text-[9px] text-muted-foreground">
-          <span className="text-primary font-medium">Multi-Node:</span> Clone and install SIGINT Hub on multiple Linux boxes or Raspberry Pis. Each node collects with its own hardware, then syncs data via the /api/sync endpoints. Monitor all nodes from any phone on the network.
+          <span className="text-primary font-medium">Multi-Node:</span> Clone and install ArmsLength SigInt on multiple Linux boxes or Raspberry Pis. Each node collects with its own hardware, then syncs data via the /api/sync endpoints. Monitor all nodes from any phone on the network.
         </p>
       </div>
     </div>

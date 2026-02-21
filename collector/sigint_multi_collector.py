@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SIGINT Hub - Multi-Protocol Collector
-=======================================
+ArmsLength SigInt - Multi-Protocol Collector
+==============================================
 Scans WiFi networks AND Bluetooth devices simultaneously using your
-system's hardware adapters and pushes everything to SIGINT Hub.
+system's hardware adapters and pushes everything to ArmsLength SigInt.
 
 Combines WiFi + Bluetooth scanning into a single collector.
 
@@ -509,9 +509,9 @@ def print_banner():
 """)
 
 def main():
-    parser = argparse.ArgumentParser(description="SIGINT Hub Multi-Protocol Collector")
+    parser = argparse.ArgumentParser(description="ArmsLength SigInt Multi-Protocol Collector")
     parser.add_argument("--key", help="Collector API key")
-    parser.add_argument("--url", help="SIGINT Hub URL")
+    parser.add_argument("--url", help="ArmsLength SigInt URL")
     parser.add_argument("--interval", type=int, default=SCAN_INTERVAL)
     parser.add_argument("--lat", type=float, help="Your latitude")
     parser.add_argument("--lng", type=float, help="Your longitude")

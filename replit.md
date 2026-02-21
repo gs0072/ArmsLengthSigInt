@@ -1,7 +1,7 @@
-# SIGINT Hub - Signal Intelligence Platform
+# ArmsLength SigInt - Signal Intelligence Platform
 
 ## Overview
-SIGINT Hub is a signal intelligence platform designed for collecting, analyzing, and triangulating various wireless signals, including Bluetooth, WiFi, RFID, SDR, and LoRa. It integrates geospatial mapping, multi-user collaboration, and AI-powered device analysis. The platform aims to serve search and rescue operations, law enforcement, military intelligence, and open-source intelligence hobbyists by providing comprehensive tools for understanding signal environments and tracking devices.
+ArmsLength SigInt is a signal intelligence platform designed for collecting, analyzing, and triangulating various wireless signals, including Bluetooth, WiFi, RFID, SDR, and LoRa. It integrates geospatial mapping, multi-user collaboration, and AI-powered device analysis. The platform aims to serve search and rescue operations, law enforcement, military intelligence, and open-source intelligence hobbyists by providing comprehensive tools for understanding signal environments and tracking devices.
 
 ## User Preferences
 - Technical/movie-cool aesthetic preferred

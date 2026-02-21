@@ -66,7 +66,7 @@ export function AppSidebar({ user, alertCount, deviceCount, profile }: AppSideba
           </div>
           <div>
             <h1 className="text-sm font-bold tracking-wider uppercase text-primary">
-              SIGINT Hub
+              ArmsLength SigInt
             </h1>
             <p className="text-[9px] text-muted-foreground uppercase tracking-widest">
               Signal Intelligence Platform

@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.siginthub.app',
-  appName: 'SIGINT Hub',
+  appId: 'com.armslength.sigint',
+  appName: 'ArmsLength SigInt',
   webDir: 'dist/public',
   server: {
     androidScheme: 'https',

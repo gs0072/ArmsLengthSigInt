@@ -54,7 +54,7 @@ export default function LandingPage() {
       <header className="relative z-10 flex items-center justify-between p-4 lg:px-8 backdrop-blur-sm border-b border-border/30">
         <div className="flex items-center gap-3">
           <Radar className="w-7 h-7 text-primary" />
-          <span className="text-sm font-bold tracking-wider uppercase text-primary">SIGINT Hub</span>
+          <span className="text-sm font-bold tracking-wider uppercase text-primary">ArmsLength SigInt</span>
         </div>
         <Button onClick={() => window.location.href = "/api/login"} data-testid="button-login">
           <Lock className="w-3.5 h-3.5 mr-1.5" />
@@ -165,7 +165,7 @@ export default function LandingPage() {
             </p>
             <Button onClick={() => window.location.href = "/api/login"} data-testid="button-cta-login">
               <Lock className="w-3.5 h-3.5 mr-1.5" />
-              Access SIGINT Hub
+              Access ArmsLength SigInt
             </Button>
           </div>
         </section>
@@ -173,7 +173,7 @@ export default function LandingPage() {
 
       <footer className="relative z-10 border-t border-border/30 px-4 lg:px-8 py-4 text-center">
         <p className="text-[10px] text-muted-foreground">
-          SIGINT Hub - Signal Intelligence Platform. All data encrypted. Activity logged for accountability.
+          ArmsLength SigInt - Signal Intelligence Platform. All data encrypted. Activity logged for accountability.
         </p>
       </footer>
     </div>

@@ -580,7 +580,7 @@ export async function registerRoutes(
         messages: [
           {
             role: "system",
-            content: `You are SIGINT Hub's AI multi-INT intelligence analyst. Generate a comprehensive all-source intelligence report about a detected device/signal using the full spectrum of intelligence disciplines. Your report should be thorough, technical, and actionable. Cross-reference all available data to build the most complete picture.
+            content: `You are ArmsLength SigInt's AI multi-INT intelligence analyst. Generate a comprehensive all-source intelligence report about a detected device/signal using the full spectrum of intelligence disciplines. Your report should be thorough, technical, and actionable. Cross-reference all available data to build the most complete picture.
 
 Structure your report with these sections using markdown headers:
 

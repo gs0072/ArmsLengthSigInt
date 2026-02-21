@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SIGINT Hub - WiFi Collector
+ArmsLength SigInt - WiFi Collector
 ========================================
 Scans nearby WiFi networks using your WiFi adapter and pushes discovered
-devices to your SIGINT Hub cloud instance.
+devices to your ArmsLength SigInt instance.
 
 Supported Platforms:
   - macOS 12+ (Monterey, Ventura, Sonoma, Sequoia)
@@ -21,7 +21,7 @@ Requirements:
     CoreWLAN compatibility
 
 Usage:
-  1. Generate a Collector API Key in SIGINT Hub Settings
+  1. Generate a Collector API Key in ArmsLength SigInt Settings
   2. Run: python3 sigint_collector.py --key YOUR_KEY --url https://your-app.replit.app
   3. On macOS: Grant Location Services permission when prompted
 
@@ -477,9 +477,9 @@ def print_banner():
 """)
 
 def main():
-    parser = argparse.ArgumentParser(description="SIGINT Hub WiFi Collector")
+    parser = argparse.ArgumentParser(description="ArmsLength SigInt WiFi Collector")
     parser.add_argument("--key", help="Collector API key (or set SIGINT_API_KEY env var)")
-    parser.add_argument("--url", help="SIGINT Hub URL (or set SIGINT_APP_URL env var)")
+    parser.add_argument("--url", help="ArmsLength SigInt URL (or set SIGINT_APP_URL env var)")
     parser.add_argument("--interval", type=int, default=SCAN_INTERVAL, help="Scan interval in seconds")
     parser.add_argument("--lat", type=float, help="Your latitude for GPS tagging")
     parser.add_argument("--lng", type=float, help="Your longitude for GPS tagging")
@@ -511,7 +511,7 @@ def main():
     if API_KEY == "YOUR_API_KEY_HERE" or not API_KEY:
         print("[!] ERROR: No API key configured.")
         print("    Set SIGINT_API_KEY environment variable or use --key flag")
-        print("    Generate a key in SIGINT Hub > Settings > Collector API Keys")
+        print("    Generate a key in ArmsLength SigInt > Settings > Collector API Keys")
         sys.exit(1)
 
     if "your-app" in APP_URL:
@@ -544,7 +544,7 @@ def main():
         print(f"[!] Unsupported OS: {system}")
         sys.exit(1)
 
-    print("[*] Testing connection to SIGINT Hub...")
+    print("[*] Testing connection to ArmsLength SigInt...")
     ok, result = push_to_server([])
     if ok:
         print("[+] Connected successfully!")
