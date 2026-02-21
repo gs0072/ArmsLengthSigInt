@@ -85,9 +85,9 @@ echo "  sudo apt-get install -y aircrack-ng iw wireless-tools"
 echo ""
 
 echo -e "${BOLD}[3/7] Fixing package.json for standard npm...${NC}"
-if grep -q 'npm:tsx@' package.json 2>/dev/null; then
-    sed -i 's/npm:tsx@[^"]*/^4.20.4/' package.json
-    echo -e "  ${GREEN}Fixed npm:tsx alias for standard npm compatibility${NC}"
+if grep -q 'npm:' package.json 2>/dev/null; then
+    sed -i 's/"npm:[^"]*@\([^"]*\)"/"\1"/g' package.json
+    echo -e "  ${GREEN}Fixed Replit-specific aliases for standard npm compatibility${NC}"
 else
     echo -e "  ${GREEN}No fix needed${NC}"
 fi
