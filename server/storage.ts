@@ -297,6 +297,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async clearUserData(userId: string): Promise<void> {
+    await db.delete(droneDetections).where(eq(droneDetections.userId, userId));
     await db.delete(observations).where(eq(observations.userId, userId));
     await db.delete(alerts).where(eq(alerts.userId, userId));
     await db.delete(followingDetection).where(eq(followingDetection.userId, userId));
