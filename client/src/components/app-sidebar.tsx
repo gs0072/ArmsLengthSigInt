@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard, Map, List, Search, Bell, Shield, UserCog,
   BookOpen, Settings, LogOut, Radar, Activity, Globe, Radio, Wrench, GitBranch,
-  Target, ShieldAlert, AudioWaveform
+  Target, ShieldAlert, AudioWaveform, Antenna
 } from "lucide-react";
 import type { User } from "@shared/models/auth";
 import type { UserProfile } from "@shared/schema";
@@ -38,6 +38,7 @@ const navItems = [
   { title: "Counter Intel", path: "/counter-intel", icon: Shield },
   { title: "Device Catalog", path: "/catalog", icon: BookOpen },
   { title: "SIGINT Tools", path: "/tools", icon: Wrench },
+  { title: "SIGINT Workstation", path: "/sigint-workstation", icon: Antenna },
   { title: "SDR Analyzer", path: "/sdr", icon: Radio },
   { title: "Signal Decoder", path: "/decoder", icon: AudioWaveform },
   { title: "LoRa Mesh", path: "/mesh", icon: Radio },

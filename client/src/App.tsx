@@ -27,6 +27,7 @@ import SARPage from "@/pages/sar";
 import DronesPage from "@/pages/drones";
 import DecoderPage from "@/pages/decoder";
 import MeshPage from "@/pages/mesh";
+import SigintWorkstationPage from "@/pages/sigint-workstation";
 import type { Alert, UserProfile, Device } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 
@@ -47,6 +48,7 @@ function AuthenticatedRouter() {
       <Route path="/drones" component={DronesPage} />
       <Route path="/decoder" component={DecoderPage} />
       <Route path="/mesh" component={MeshPage} />
+      <Route path="/sigint-workstation" component={SigintWorkstationPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/node-report/:id" component={NodeReportPage} />

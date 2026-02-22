@@ -2941,6 +2941,230 @@ Format your response clearly with headers. Be specific and actionable.`;
     }
   });
 
+  app.post("/api/sigint/auto-classify", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        signals: z.array(z.object({
+          frequency: z.number(),
+          power: z.number(),
+          bandwidth: z.number(),
+          modulation: z.string().optional(),
+          label: z.string().optional(),
+        })),
+        threshold: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { signals, threshold = -60 } = parsed.data;
+      const strongSignals = signals.filter(s => s.power > threshold).sort((a, b) => b.power - a.power).slice(0, 100);
+
+      const classified = strongSignals.map(sig => {
+        const freqMHz = sig.frequency / 1e6;
+        const identifications = identifyByFrequency(freqMHz);
+        const bestMatch = identifications[0];
+
+        let autoDecoderType: string | null = null;
+        let signalCategory = "unknown";
+        let signalName = sig.label || "Unknown Signal";
+        let interestLevel = "low";
+
+        if (bestMatch) {
+          signalName = bestMatch.name;
+          signalCategory = bestMatch.category;
+          interestLevel = bestMatch.interestLevel;
+          if (bestMatch.decoderAvailable && bestMatch.decoderType) {
+            autoDecoderType = bestMatch.decoderType;
+          }
+        }
+
+        return {
+          frequency: sig.frequency,
+          frequencyMHz: freqMHz,
+          power: sig.power,
+          bandwidth: sig.bandwidth,
+          signalName,
+          signalCategory,
+          interestLevel,
+          autoDecoderType,
+          decoderAvailable: !!autoDecoderType,
+          identifications,
+          modulation: bestMatch?.modulation || sig.modulation || "Unknown",
+          typicalUse: bestMatch?.typicalUse || "",
+          legalStatus: bestMatch?.legalStatus || "",
+        };
+      });
+
+      res.json({ classified, totalDetected: classified.length });
+    } catch (error: any) {
+      res.status(500).json({ message: "Auto-classification failed", error: error.message });
+    }
+  });
+
+  app.post("/api/sigint/auto-decode", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequency: z.number(),
+        power: z.number().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { frequency, latitude, longitude } = parsed.data;
+      const frequencyMHz = frequency / 1e6;
+      const identifications = identifyByFrequency(frequencyMHz);
+      const bestMatch = identifications[0];
+      const locationTips = latitude !== undefined && longitude !== undefined
+        ? identifyByLocation(frequencyMHz, latitude, longitude)
+        : [];
+
+      let decoderType = "unknown";
+      if (bestMatch?.decoderAvailable && bestMatch?.decoderType) {
+        decoderType = bestMatch.decoderType;
+      } else {
+        if (frequencyMHz >= 87.5 && frequencyMHz <= 108) decoderType = "wfm";
+        else if (frequencyMHz >= 118 && frequencyMHz <= 137) decoderType = "am";
+        else if (frequencyMHz >= 144 && frequencyMHz <= 148) decoderType = "fm";
+        else if (frequencyMHz >= 156 && frequencyMHz <= 163) decoderType = "fm";
+        else if (frequencyMHz >= 462 && frequencyMHz <= 468) decoderType = "fm";
+      }
+
+      const decoded = generateSimulatedDecode(decoderType, frequency);
+
+      res.json({
+        decoded,
+        decoderType,
+        autoDetected: true,
+        identifications,
+        locationTips,
+        signalName: bestMatch?.name || "Unknown Signal",
+        signalCategory: bestMatch?.category || "Unknown",
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: "Auto-decode failed", error: error.message });
+    }
+  });
+
+  app.post("/api/sigint/fcc-lookup", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequencyMHz: z.number(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        signalType: z.string().optional(),
+        modulation: z.string().optional(),
+        power: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { frequencyMHz, latitude, longitude, signalType, modulation, power } = parsed.data;
+      const identifications = identifyByFrequency(frequencyMHz);
+
+      const openai = new OpenAI();
+      const prompt = `You are an expert RF engineer and FCC licensing specialist. Analyze this frequency and provide information about likely FCC licensees and signal sources.
+
+Frequency: ${frequencyMHz.toFixed(6)} MHz
+${signalType ? `Signal Type: ${signalType}` : ""}
+${modulation ? `Modulation: ${modulation}` : ""}
+${power !== undefined ? `Power Level: ${power} dBm` : ""}
+${latitude !== undefined ? `Location: ${latitude.toFixed(4)}, ${longitude?.toFixed(4)}` : ""}
+
+${identifications.length > 0 ? `Known Allocations:\n${identifications.map(id => `- ${id.name} (${id.category}): ${id.description}`).join("\n")}` : ""}
+
+Provide a concise analysis covering:
+1. **FCC Allocation**: What service/band is this frequency allocated to?
+2. **Likely Licensees**: Who typically operates on this frequency? (Include specific agency/company types)
+3. **License Type**: What FCC license class covers this frequency? (Part 87, 90, 95, 97, etc.)
+4. **Signal Source Assessment**: Based on the parameters, what is the most likely source?
+5. **Legal Status**: Is it legal to monitor? Any restrictions?
+6. **ULS Lookup Tip**: How to search for the specific licensee in the FCC ULS database.
+
+Be specific and actionable. Format with clear headers.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1200,
+        temperature: 0.3,
+      });
+
+      const analysis = completion.choices[0]?.message?.content || "FCC lookup unavailable.";
+
+      res.json({
+        analysis,
+        frequencyMHz,
+        identifications,
+      });
+    } catch (error: any) {
+      console.error("FCC lookup failed:", error);
+      res.status(500).json({ message: "FCC lookup failed", error: error.message });
+    }
+  });
+
+  app.post("/api/sigint/ai-identify-unknown", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequencyMHz: z.number(),
+        power: z.number().optional(),
+        bandwidth: z.number().optional(),
+        modulation: z.string().optional(),
+        characteristics: z.string().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+
+      const { frequencyMHz, power, bandwidth, modulation, characteristics, latitude, longitude } = parsed.data;
+      const identifications = identifyByFrequency(frequencyMHz);
+
+      const openai = new OpenAI();
+      const prompt = `You are an expert SIGINT analyst specializing in signal identification and decryption analysis. An unknown or unidentified signal has been detected and needs analysis.
+
+Signal Parameters:
+- Frequency: ${frequencyMHz.toFixed(6)} MHz
+${power !== undefined ? `- Power: ${power} dBm` : ""}
+${bandwidth !== undefined ? `- Bandwidth: ${(bandwidth / 1000).toFixed(1)} kHz` : ""}
+${modulation ? `- Detected Modulation: ${modulation}` : ""}
+${characteristics ? `- Additional Characteristics: ${characteristics}` : ""}
+${latitude !== undefined ? `- Location: ${latitude.toFixed(4)}, ${longitude?.toFixed(4)}` : ""}
+
+${identifications.length > 0 ? `Database matches:\n${identifications.map(id => `- ${id.name}: ${id.description} (${id.modulation})`).join("\n")}` : "No matches in frequency database."}
+
+Provide detailed analysis:
+1. **Signal Identification**: What is this signal most likely? List top 3 possibilities with confidence percentages.
+2. **Modulation Analysis**: What modulation scheme is being used? How to confirm?
+3. **Encryption Assessment**: Is this signal likely encrypted? If so, what encryption method is probable?
+4. **Decoding Approach**: Step-by-step approach to decode/demodulate this signal. Include specific software tools (e.g., GNU Radio, dsd, multimon-ng, etc.)
+5. **Protocol Analysis**: If digital, what protocol stack is likely in use?
+6. **Recommended Tools**: Specific SDR software and settings to decode this signal type.
+7. **Intelligence Value**: What information could be extracted if successfully decoded?
+
+Be technically detailed and actionable.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1500,
+        temperature: 0.3,
+      });
+
+      const analysis = completion.choices[0]?.message?.content || "Analysis unavailable.";
+
+      res.json({
+        analysis,
+        frequencyMHz,
+        identifications,
+      });
+    } catch (error: any) {
+      console.error("AI identify unknown failed:", error);
+      res.status(500).json({ message: "AI identification failed", error: error.message });
+    }
+  });
+
   return httpServer;
 }
 
