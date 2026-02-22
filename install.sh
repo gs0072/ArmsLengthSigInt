@@ -63,25 +63,66 @@ if [ "$NODE_VERSION" -lt 18 ]; then
 fi
 
 echo ""
-echo -e "${BOLD}[2/7] Checking SIGINT tools (optional)...${NC}"
+echo -e "${BOLD}[2/7] Installing SIGINT tools...${NC}"
 echo ""
+
+SIGINT_PACKAGES="bluez nmap gpsd gpsd-clients rtl-sdr librtlsdr-dev aircrack-ng iw wireless-tools sox alsa-utils libsox-fmt-all"
+
+if [ "$(id -u)" = "0" ]; then
+    echo -e "  ${GREEN}Running as root - auto-installing dependencies${NC}"
+    apt-get update -qq 2>/dev/null || true
+    for pkg in $SIGINT_PACKAGES; do
+        if dpkg -s "$pkg" &>/dev/null; then
+            echo -e "  ${GREEN}[OK]${NC} $pkg already installed"
+        else
+            echo -e "  ${YELLOW}[..]${NC} Installing $pkg..."
+            if apt-get install -y -qq "$pkg" 2>/dev/null; then
+                echo -e "  ${GREEN}[OK]${NC} $pkg installed"
+            else
+                echo -e "  ${RED}[--]${NC} $pkg failed to install (non-critical)"
+            fi
+        fi
+    done
+else
+    echo -e "  ${YELLOW}Not running as root - checking tools only${NC}"
+    echo "  Run with sudo for auto-install: sudo ./install.sh"
+    echo ""
+fi
+
+echo ""
+echo -e "  Verifying tool availability:"
 check_command hcitool || true
 check_command bluetoothctl || true
 check_command hciconfig || true
 check_command iwconfig || true
+check_command iw || true
 check_command airmon-ng || true
 check_command nmap || true
 check_command rtl_sdr || true
 check_command rtl_power || true
 check_command rtl_fm || true
+check_command rtl_test || true
+check_command sox || true
+check_command play || true
+check_command aplay || true
 check_command gpsd || true
+check_command gpspipe || true
 check_command dump1090 || true
 echo ""
 
-echo -e "${YELLOW}Tip: Install missing tools with:${NC}"
-echo "  sudo apt-get install -y bluez nmap gpsd gpsd-clients"
-echo "  sudo apt-get install -y rtl-sdr librtlsdr-dev"
-echo "  sudo apt-get install -y aircrack-ng iw wireless-tools"
+MISSING_TOOLS=""
+for cmd in hcitool iwconfig rtl_power rtl_fm sox gpsd; do
+    if ! command -v "$cmd" &>/dev/null; then
+        MISSING_TOOLS="$MISSING_TOOLS $cmd"
+    fi
+done
+
+if [ -n "$MISSING_TOOLS" ]; then
+    echo -e "${YELLOW}Some tools still missing:${MISSING_TOOLS}${NC}"
+    echo -e "  Install manually: ${GREEN}sudo apt-get install -y $SIGINT_PACKAGES${NC}"
+else
+    echo -e "  ${GREEN}All core SIGINT tools available${NC}"
+fi
 echo ""
 
 echo -e "${BOLD}[3/7] Fixing package.json for standard npm...${NC}"

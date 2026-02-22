@@ -10,7 +10,7 @@ import {
   Radio, Signal, Play, Square, Pause, RotateCcw, Zap, Wifi, Antenna,
   MonitorSpeaker, AlertTriangle, Check, X, Loader2,
   ChevronDown, ChevronUp, Download, Plus, Info, Crosshair, Activity,
-  Bookmark, Link2
+  Bookmark, Link2, Volume2, VolumeX, Headphones
 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -41,6 +41,16 @@ interface FreqPreset {
   startMHz: number;
   endMHz: number;
   description: string;
+}
+
+interface SDRAudioStatus {
+  active: boolean;
+  frequency: number | null;
+  mode: string | null;
+  gain: string;
+  squelch: number;
+  pid: number | null;
+  error: string | null;
 }
 
 type ConnectionMode = "simulation" | "server";
@@ -402,9 +412,13 @@ function WaterfallCanvas({
 function SignalTable({
   signals,
   onCreateNode,
+  onListenSignal,
+  audioStatus,
 }: {
   signals: SDRSignal[];
   onCreateNode: (sig: SDRSignal) => void;
+  onListenSignal: (sig: SDRSignal) => void;
+  audioStatus: SDRAudioStatus | null;
 }) {
   const strongSignals = signals
     .filter(s => s.power > -65)
@@ -421,7 +435,7 @@ function SignalTable({
 
   return (
     <div className="space-y-0.5 max-h-[300px] overflow-auto">
-      <div className="grid grid-cols-[1fr_80px_80px_1fr_40px] gap-2 text-[9px] text-muted-foreground uppercase tracking-wider font-medium px-2 py-1 sticky top-0 bg-background">
+      <div className="grid grid-cols-[1fr_80px_80px_1fr_70px] gap-2 text-[9px] text-muted-foreground uppercase tracking-wider font-medium px-2 py-1 sticky top-0 bg-background">
         <span>Frequency</span>
         <span>Power</span>
         <span>Band</span>
@@ -430,29 +444,47 @@ function SignalTable({
       </div>
       {strongSignals.map((sig, i) => {
         const freqMHz = sig.frequency / 1e6;
+        const isListening = audioStatus?.active && audioStatus.frequency === sig.frequency;
         const powerColor = sig.power > -30 ? "hsl(0, 80%, 55%)" :
           sig.power > -50 ? "hsl(35, 90%, 55%)" :
           sig.power > -60 ? "hsl(60, 80%, 50%)" : "hsl(180, 60%, 45%)";
 
         return (
-          <div key={i} className="grid grid-cols-[1fr_80px_80px_1fr_40px] gap-2 items-center text-[10px] px-2 py-1.5 rounded-md border border-border/20 bg-muted/5">
+          <div key={i} className={`grid grid-cols-[1fr_80px_80px_1fr_70px] gap-2 items-center text-[10px] px-2 py-1.5 rounded-md border bg-muted/5 ${isListening ? "border-cyan-500/50 bg-cyan-500/5" : "border-border/20"}`}>
             <span className="font-mono font-medium">{freqMHz.toFixed(3)} MHz</span>
             <span className="font-mono" style={{ color: powerColor }}>{sig.power.toFixed(1)} dBm</span>
             <span className="text-muted-foreground">{getBandLabel(freqMHz)}</span>
             <span className="text-muted-foreground truncate">{sig.label || "Unknown"}</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => onCreateNode(sig)}
-                  data-testid={`button-create-node-${i}`}
-                >
-                  <Plus className="w-3 h-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Create node from signal</TooltipContent>
-            </Tooltip>
+            <div className="flex gap-0.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant={isListening ? "default" : "ghost"}
+                    className={isListening ? "bg-cyan-600 hover:bg-cyan-700 h-6 w-6" : "h-6 w-6"}
+                    onClick={() => onListenSignal(sig)}
+                    data-testid={`button-listen-signal-${i}`}
+                  >
+                    {isListening ? <Volume2 className="w-3 h-3" /> : <Headphones className="w-3 h-3" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{isListening ? "Currently listening" : "Listen to signal"}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={() => onCreateNode(sig)}
+                    data-testid={`button-create-node-${i}`}
+                  >
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Create node from signal</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         );
       })}
@@ -479,6 +511,9 @@ export default function SDRPage() {
   const [currentSignals, setCurrentSignals] = useState<SDRSignal[]>([]);
   const [showSetup, setShowSetup] = useState(false);
   const [scanCount, setScanCount] = useState(0);
+  const [audioDemodMode, setAudioDemodMode] = useState<string>("wfm");
+  const [audioSquelch, setAudioSquelch] = useState(0);
+  const [manualTuneFreq, setManualTuneFreq] = useState("");
   const autoScanRef = useRef(false);
   const scanTimerRef = useRef<any>(null);
 
@@ -489,6 +524,67 @@ export default function SDRPage() {
   const { data: presets = [] } = useQuery<FreqPreset[]>({
     queryKey: ["/api/sdr/presets"],
   });
+
+  const { data: audioStatus, refetch: refetchAudio } = useQuery<SDRAudioStatus>({
+    queryKey: ["/api/sdr/audio/status"],
+    refetchInterval: 3000,
+  });
+
+  const startAudioMutation = useMutation({
+    mutationFn: async ({ frequencyHz, demodMode }: { frequencyHz: number; demodMode: string }) => {
+      const res = await apiRequest("POST", "/api/sdr/audio/start", {
+        frequencyHz,
+        mode: demodMode,
+        squelch: audioSquelch,
+      });
+      return res.json();
+    },
+    onSuccess: (data: SDRAudioStatus) => {
+      refetchAudio();
+      if (data.error) {
+        toast({ title: "Audio Error", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "Audio Started", description: `Listening at ${((data.frequency || 0) / 1e6).toFixed(3)} MHz (${(data.mode || "").toUpperCase()})` });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "Audio Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const stopAudioMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/sdr/audio/stop");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchAudio();
+      toast({ title: "Audio Stopped" });
+    },
+  });
+
+  const handleListenSignal = useCallback((sig: SDRSignal) => {
+    if (audioStatus?.active && audioStatus.frequency === sig.frequency) {
+      stopAudioMutation.mutate();
+    } else {
+      const freqMHz = sig.frequency / 1e6;
+      let demod = audioDemodMode;
+      if (freqMHz >= 88 && freqMHz <= 108) demod = "wfm";
+      else if (freqMHz >= 118 && freqMHz <= 137) demod = "am";
+      else if (freqMHz >= 144 && freqMHz <= 148) demod = "fm";
+      else if (freqMHz >= 462 && freqMHz <= 468) demod = "fm";
+      startAudioMutation.mutate({ frequencyHz: sig.frequency, demodMode: demod });
+    }
+  }, [audioStatus, audioDemodMode, startAudioMutation, stopAudioMutation]);
+
+  const handleManualTune = useCallback(() => {
+    const freqMHz = parseFloat(manualTuneFreq);
+    if (isNaN(freqMHz) || freqMHz < 24 || freqMHz > 1766) {
+      toast({ title: "Invalid frequency", description: "Enter a frequency between 24 and 1766 MHz", variant: "destructive" });
+      return;
+    }
+    startAudioMutation.mutate({ frequencyHz: freqMHz * 1e6, demodMode: audioDemodMode });
+  }, [manualTuneFreq, audioDemodMode, startAudioMutation, toast]);
 
   const runScan = useCallback(async () => {
     setScanning(true);
@@ -795,7 +891,8 @@ export default function SDRPage() {
           height={280}
           peakHold={peakHold}
           onFreqClick={(freq) => {
-            toast({ title: `${freq.toFixed(3)} MHz`, description: `Frequency selected. Click the + icon in the signal table to create a node.` });
+            setManualTuneFreq(freq.toFixed(3));
+            toast({ title: `${freq.toFixed(3)} MHz`, description: `Frequency selected. Use the audio panel to listen or click + to create a node.` });
           }}
         />
 
@@ -805,6 +902,92 @@ export default function SDRPage() {
           endFreqMHz={parseFloat(endFreq) || 108}
           height={160}
         />
+
+        <Card className={`p-3 border ${audioStatus?.active ? "border-cyan-500/40 bg-cyan-500/5" : "border-border/30"}`}>
+          <div className="flex items-center gap-2 mb-2">
+            {audioStatus?.active ? (
+              <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
+            ) : (
+              <VolumeX className="w-4 h-4 text-muted-foreground" />
+            )}
+            <span className="text-xs font-medium">SDR Audio Receiver</span>
+            {audioStatus?.active && (
+              <Badge variant="outline" className="text-[9px] border-cyan-500/40 text-cyan-400" data-testid="badge-audio-active">
+                LIVE {((audioStatus.frequency || 0) / 1e6).toFixed(3)} MHz ({(audioStatus.mode || "").toUpperCase()})
+              </Badge>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <label className="text-[9px] text-muted-foreground uppercase">Frequency (MHz)</label>
+              <Input
+                type="text"
+                value={manualTuneFreq}
+                onChange={(e) => setManualTuneFreq(e.target.value)}
+                placeholder="e.g. 99.5"
+                className="w-28 h-8 text-xs font-mono"
+                data-testid="input-tune-freq"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-muted-foreground uppercase">Demod Mode</label>
+              <Select value={audioDemodMode} onValueChange={setAudioDemodMode}>
+                <SelectTrigger className="w-24 h-8 text-xs" data-testid="select-demod-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="wfm">WFM</SelectItem>
+                  <SelectItem value="fm">NFM</SelectItem>
+                  <SelectItem value="am">AM</SelectItem>
+                  <SelectItem value="usb">USB</SelectItem>
+                  <SelectItem value="lsb">LSB</SelectItem>
+                  <SelectItem value="raw">RAW</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-muted-foreground uppercase">Squelch</label>
+              <Input
+                type="number"
+                value={audioSquelch}
+                onChange={(e) => setAudioSquelch(parseInt(e.target.value) || 0)}
+                min={0}
+                max={500}
+                className="w-20 h-8 text-xs font-mono"
+                data-testid="input-squelch"
+              />
+            </div>
+            <Button
+              onClick={handleManualTune}
+              disabled={!manualTuneFreq || startAudioMutation.isPending}
+              className="h-8 text-xs"
+              data-testid="button-tune"
+            >
+              {startAudioMutation.isPending ? (
+                <Loader2 className="w-3 h-3 animate-spin mr-1" />
+              ) : (
+                <Headphones className="w-3 h-3 mr-1" />
+              )}
+              Tune & Listen
+            </Button>
+            {audioStatus?.active && (
+              <Button
+                onClick={() => stopAudioMutation.mutate()}
+                variant="destructive"
+                className="h-8 text-xs"
+                disabled={stopAudioMutation.isPending}
+                data-testid="button-stop-audio"
+              >
+                <Square className="w-3 h-3 mr-1" /> Stop
+              </Button>
+            )}
+          </div>
+          {audioStatus?.error && (
+            <div className="mt-2 text-[10px] text-red-400 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" /> {audioStatus.error}
+            </div>
+          )}
+        </Card>
 
         <Tabs defaultValue="signals" className="w-full">
           <TabsList data-testid="sdr-detail-tabs">
@@ -823,6 +1006,8 @@ export default function SDRPage() {
               <SignalTable
                 signals={currentSignals}
                 onCreateNode={(sig) => createNodeMutation.mutate(sig)}
+                onListenSignal={handleListenSignal}
+                audioStatus={audioStatus || null}
               />
             </Card>
           </TabsContent>

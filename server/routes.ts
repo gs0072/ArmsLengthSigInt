@@ -13,7 +13,7 @@ import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickS
 import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
-import { getNodeConfig, getScannerStatus, startLinuxScanner, stopLinuxScanner, setDeviceCallback, runManualScan, type ScannedBLEDevice, type ScannedWiFiDevice } from "./services/linux-scanner";
+import { getNodeConfig, getScannerStatus, startLinuxScanner, stopLinuxScanner, setDeviceCallback, runManualScan, checkAndInstallDependencies, getDependencyStatus, startSDRAudio, stopSDRAudio, tuneSDRAudio, getSDRAudioStatus, type ScannedBLEDevice, type ScannedWiFiDevice, type ScannedSDRSignal, type SDRAudioMode } from "./services/linux-scanner";
 import { analyzeDeviceAssociations, ASSOCIATION_TYPE_LABELS, triangulateDevice } from "./services/association-analyzer";
 import { matchDeviceToSignature, DEVICE_BROADCAST_SIGNATURES_SERVER } from "./services/signature-matcher";
 import { getTierFeatures, isFeatureAllowed, isDataModeAllowed, TIER_FEATURES, FEATURE_LABELS } from "../shared/tier-features";
@@ -827,6 +827,47 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
 
       setDeviceCallback(async (device, type, gps) => {
         try {
+          if (type === "sdr") {
+            const sdrSignal = device as ScannedSDRSignal;
+            const freqMHz = sdrSignal.frequency / 1e6;
+            const sdrMac = `SDR:${freqMHz.toFixed(3)}MHz`;
+            const existing = await storage.getDevices(userId);
+            const alreadyExists = existing.some(d => d.macAddress === sdrMac);
+            if (alreadyExists) return;
+
+            const nodeConfig = getNodeConfig();
+            const newDevice = await storage.createDevice({
+              userId,
+              name: sdrSignal.label || `SDR Signal ${freqMHz.toFixed(3)} MHz`,
+              macAddress: sdrMac,
+              signalType: "sdr",
+              deviceType: `SDR ${sdrSignal.band} Signal`,
+              manufacturer: sdrSignal.band,
+              notes: `Auto-discovered by SDR scan at ${freqMHz.toFixed(3)} MHz (${sdrSignal.power.toFixed(1)} dB) on node ${nodeConfig.nodeId}.`,
+              metadata: { collectorNodeId: nodeConfig.nodeId, frequency: sdrSignal.frequency, power: sdrSignal.power, bandwidth: sdrSignal.bandwidth },
+            });
+
+            const obsData: any = {
+              deviceId: newDevice.id,
+              userId,
+              signalType: "sdr",
+              signalStrength: sdrSignal.power,
+              frequency: freqMHz,
+              protocol: sdrSignal.band,
+            };
+
+            if (gps) {
+              obsData.latitude = gps.latitude;
+              obsData.longitude = gps.longitude;
+              obsData.altitude = gps.altitude;
+              obsData.heading = gps.heading;
+              obsData.speed = gps.speed;
+            }
+
+            await storage.createObservation(obsData);
+            return;
+          }
+
           const mac = (device as ScannedBLEDevice).macAddress || (device as ScannedWiFiDevice).macAddress;
           const existing = await storage.getDevices(userId);
           const alreadyExists = existing.some(d => d.macAddress === mac);
@@ -904,6 +945,97 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     } catch (error) {
       console.error("Error running manual scan:", error);
       res.status(500).json({ message: "Failed to run manual scan" });
+    }
+  });
+
+  // ============ DEPENDENCY STATUS ============
+  app.get("/api/scanner/dependencies", isAuthenticated, async (_req: any, res) => {
+    try {
+      const deps = getDependencyStatus();
+      if (deps.length === 0) {
+        const freshDeps = await checkAndInstallDependencies();
+        res.json(freshDeps);
+      } else {
+        res.json(deps);
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check dependencies" });
+    }
+  });
+
+  app.post("/api/scanner/dependencies/install", isAuthenticated, async (_req: any, res) => {
+    try {
+      const deps = await checkAndInstallDependencies();
+      res.json(deps);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to install dependencies" });
+    }
+  });
+
+  // ============ SDR AUDIO ============
+  app.get("/api/sdr/audio/status", isAuthenticated, async (_req: any, res) => {
+    try {
+      const status = getSDRAudioStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get SDR audio status" });
+    }
+  });
+
+  app.post("/api/sdr/tune", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequencyHz: z.number().min(24e6).max(1766e6),
+        mode: z.enum(["fm", "wfm", "am", "usb", "lsb", "raw"]).default("fm"),
+        gain: z.string().default("auto"),
+        squelch: z.number().int().min(0).max(500).default(0),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const result = await tuneSDRAudio(
+        parsed.data.frequencyHz,
+        parsed.data.mode as SDRAudioMode,
+        parsed.data.gain,
+        parsed.data.squelch
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to tune SDR audio" });
+    }
+  });
+
+  app.post("/api/sdr/audio/start", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        frequencyHz: z.number().min(24e6).max(1766e6),
+        mode: z.enum(["fm", "wfm", "am", "usb", "lsb", "raw"]).default("fm"),
+        gain: z.string().default("auto"),
+        squelch: z.number().int().min(0).max(500).default(0),
+        sampleRate: z.number().int().min(8000).max(250000).default(48000),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const result = await startSDRAudio(
+        parsed.data.frequencyHz,
+        parsed.data.mode as SDRAudioMode,
+        parsed.data.gain,
+        parsed.data.squelch,
+        parsed.data.sampleRate
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to start SDR audio" });
+    }
+  });
+
+  app.post("/api/sdr/audio/stop", isAuthenticated, async (_req: any, res) => {
+    try {
+      const result = stopSDRAudio();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to stop SDR audio" });
     }
   });
 
