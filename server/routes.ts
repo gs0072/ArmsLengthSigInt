@@ -2826,7 +2826,7 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
       const mode = parsed.data.mode;
       const existingDetections = parsed.data.existingDetections || [];
 
-      const sdrBandScans = scanDroneBands(mode);
+      const sdrBandScans = await scanDroneBands(mode);
       const sdrSignals = sdrBandScans.map(b => b.signals);
 
       const devices_list = await storage.getDevices(userId);
@@ -2864,8 +2864,10 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
 
       const detections = analyzeForDrones(sdrSignals, wifiDevices, bleDevices, existingDetections);
 
+      const anySdrAttached = sdrBandScans.some(b => b.sdrAttached);
+
       for (const det of detections) {
-        if (det.overallConfidence > 0.5) {
+        if (det.overallConfidence > 0.7 || (det.fusionScore >= 2 && det.overallConfidence > 0.5)) {
           try {
             await storage.createDroneDetection({
               userId,
@@ -2894,7 +2896,8 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
       res.json({
         detections,
         scanSummary: {
-          sdrBands: sdrBandScans.map(b => ({ band: b.band, signalCount: b.signals.length })),
+          sdrBands: sdrBandScans.map(b => ({ band: b.band, signalCount: b.signals.length, sdrAttached: b.sdrAttached })),
+          sdrAttached: anySdrAttached,
           wifiDevicesScanned: wifiDevices.length,
           bleDevicesScanned: bleDevices.length,
           totalSignalsAnalyzed: sdrSignals.reduce((sum, s) => sum + s.length, 0) + wifiDevices.length + bleDevices.length,

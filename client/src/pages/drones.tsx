@@ -93,6 +93,7 @@ interface WatchScanResult {
     totalSignalsAnalyzed: number;
     dronesDetected: number;
     highThreatCount: number;
+    sdrAttached: boolean;
   };
   timestamp: number;
   frequencyBands: Array<{ name: string; startMHz: number; endMHz: number; category: string; description: string }>;
@@ -352,6 +353,11 @@ export default function DronesPage() {
             <div className="flex items-center gap-2 text-xs font-semibold">
               <Antenna className="w-3.5 h-3.5 text-purple-400" />
               Scan Coverage
+              {!lastScanSummary.sdrAttached && scanMode === "server" && (
+                <Badge variant="outline" className="text-[8px] border-yellow-500/30 text-yellow-400" data-testid="badge-no-sdr">
+                  No SDR Hardware
+                </Badge>
+              )}
             </div>
             <span className="text-[9px] text-muted-foreground">
               {lastScanSummary.sdrBands.length} RF bands | {lastScanSummary.wifiDevicesScanned} WiFi | {lastScanSummary.bleDevicesScanned} BLE
@@ -398,8 +404,16 @@ export default function DronesPage() {
               <Radar className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-30" />
               <p className="text-sm text-muted-foreground">No drones detected</p>
               <p className="text-[10px] text-muted-foreground mt-1">
-                {scanCount === 0 ? "Click 'Drone Watch' to start continuous scanning or 'Single Scan' for a one-time sweep" : "Airspace appears clear. Continue monitoring."}
+                {scanCount === 0
+                  ? "Click 'Drone Watch' to start continuous scanning or 'Single Scan' for a one-time sweep"
+                  : "Airspace appears clear. Continue monitoring."}
               </p>
+              {lastScanSummary && !lastScanSummary.sdrAttached && scanMode === "server" && scanCount > 0 && (
+                <p className="text-[10px] text-yellow-400 mt-2">
+                  SDR radio not detected — RF band scanning inactive. WiFi/BLE device matching is active.
+                  {" "}Switch to Simulation mode to test with synthetic signals.
+                </p>
+              )}
             </Card>
           ) : (
             <div className="space-y-2">
