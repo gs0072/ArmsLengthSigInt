@@ -1,7 +1,7 @@
 # ArmsLength SigInt - Signal Intelligence Platform
 
 ## Overview
-ArmsLength SigInt is a signal intelligence platform designed for collecting, analyzing, and triangulating various wireless signals, including Bluetooth, WiFi, RFID, SDR, and LoRa. It integrates geospatial mapping, multi-user collaboration, and AI-powered device analysis. The platform aims to serve search and rescue operations, law enforcement, military intelligence, and open-source intelligence hobbyists by providing comprehensive tools for understanding signal environments and tracking devices.
+ArmsLength SigInt is a signal intelligence platform designed for collecting, analyzing, and triangulating various wireless signals (Bluetooth, WiFi, RFID, SDR, LoRa). It integrates geospatial mapping, multi-user collaboration, and AI-powered device analysis. The platform's primary purpose is to provide comprehensive tools for understanding signal environments and tracking devices, serving search and rescue, law enforcement, military intelligence, and open-source intelligence.
 
 ## User Preferences
 - Technical/movie-cool aesthetic preferred
@@ -11,45 +11,29 @@ ArmsLength SigInt is a signal intelligence platform designed for collecting, ana
 - Meshtastic/Meshcore-style map navigation (no auto-recenter on manual pan)
 
 ## System Architecture
-The platform is built with a React + TypeScript frontend utilizing Tailwind CSS, Shadcn UI, Wouter for routing, TanStack Query for data fetching, Leaflet for interactive maps, and Framer Motion for animations. The backend is an Express.js + TypeScript server with a PostgreSQL database (managed by Drizzle ORM) and Replit Auth for user management.
+The platform utilizes a React + TypeScript frontend with Tailwind CSS, Shadcn UI, Wouter, TanStack Query, Leaflet, and Framer Motion. The backend is an Express.js + TypeScript server with a PostgreSQL database (Drizzle ORM) and Replit Auth.
 
-**Key Features:**
-- **Collection Sensors:** Configurable hardware sensors (Bluetooth, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B, environmental sensors) with various connection methods (builtin, bluetooth, usb, serial, network). Sensors activate from the Dashboard to auto-discover nodes. Each sensor type has detailed setup instructions in the Add Sensor dialog including recommended hardware, setup steps, recommended connection methods, and tips. The dialog auto-selects the best connection method when switching sensor types.
-- **Real Sensor Monitoring:** Dashboard activates configured hardware sensors for real signal collection. No simulation/fake data generation. Sensors report status (idle, collecting) and detected signals appear as real nodes. The `POST /api/scan/passive` endpoint is disabled (returns 410).
-- **Device Associations (Multi-INT Intelligence Links):** Automated analysis creates links between devices based on geospatial (co-movement, triangulation), signal (RSSI correlation, temporal activation), and measurement/signature intelligence (RF emission, frequency fingerprinting). Associations require geographic diversity for spatial analysis and provide statistical outputs like likelihood ratios and confidence levels.
-- **NodeLinkGraph Component:** A canvas-based force-directed graph for visualizing device associations, used in both individual Node Reports and a dedicated Link Analysis page.
-- **GEOINT Position Fix / Triangulation:** Calculates estimated latitude/longitude, error radius, and confidence for a single device using RSSI-weighted multilateration from multiple observations.
-- **Trusted Users & Data Modes:** Supports "Friends" mode for sharing data with trusted users and "Combined/All Sources" mode for aggregating data. "OSINT" mode provides configuration for 12 curated OSINT data sources and HUMINT linking guidance.
-- **OSINT Links / HUMINT Associations:** Manages associations between human identities/aliases and detected devices.
-- **Heat Map Visualization:** Integrates Leaflet.heat on the World Map to visualize signal density with RSSI-weighted intensity.
-- **Data Export/Import:** Full backup and restore functionality for devices, observations, alerts, sensors, and associations, with device ID remapping and MAC address deduplication.
-- **Map Navigation:** Meshtastic-style map interaction with location search (Nominatim geocoding), "center on my location" via GPS, and pink markers for search results.
-- **SIGINT Tools Page:** Integrates `nmap` for network scanning (restricted to private networks), `Meshtastic` for LoRa mesh device connectivity, and `SDR` for RTL-SDR spectrum scanning.
-- **SDR Spectrum Analyzer (Dedicated Page /sdr):** Full-page canvas-based spectrum analyzer with real-time spectrum chart, waterfall display, signal detection table, and frequency preset database. Two connection modes: Simulation (realistic RF demo data with known frequency allocations) and Server-Attached (USB RTL-SDR connected directly to this machine). Supports auto-scan, peak hold, signal identification from known frequency allocations (FM, aviation, NOAA, amateur radio, ISM, ADS-B, GPS, cellular), and automatic node creation from detected signals.
-- **Capacitor Native App:** The app is set up with Capacitor for building native iOS/Android apps with direct hardware access via CoreBluetooth (BLE scanning), CoreLocation (GPS), and Core ML (on-device AI). Native BLE plugin supports Meshtastic, Flipper Zero, and generic BLE device discovery. See `capacitor.config.ts` and `client/src/lib/capacitor-ble.ts` for native plugin architecture.
-- **System Detection:** `/api/system/info` endpoint provides host system information (OS, arch, CPU, memory, hostname) and dynamically lists installed SIGINT tools.
-- **Device Catalog with Broadcast Signatures:** A curated catalog of devices (e.g., pacemakers, medical devices) with known broadcast names for fast searching and alert creation.
-- **AI-powered Multi-INT Intelligence Analysis:** Leverages OpenAI's gpt-4o for comprehensive analysis covering SIGINT, GEOINT, MASINT, OSINT, and COMINT, including OUI/MAC cross-referencing, OSINT enrichment, behavioral pattern analysis, and threat assessment.
-- **SIGINT Node Report:** Comprehensive intelligence dossier for each detected node.
-- **UI/UX:** Dark cyberpunk-themed interface with cyan primary color, purple accents, and JetBrains Mono font. Responsive design with multi-monitor support.
-- **Terminology:** "Nodes" refers to detected signals/devices, "Sensors" to collection hardware.
-- **Backend Validation:** Zod schemas are used for input validation on POST routes (e.g., `createDeviceSchema`, `createObservationSchema`, `createSensorSchema`).
-- **Tier Feature System:** Five-tier system (Free, Basic, Professional, Enterprise, Admin) with per-tier feature gating defined in `shared/tier-features.ts`. Tiers control: max devices/sensors/trusted users, analysis timeout (45s for non-enterprise, unlimited for enterprise/admin), allowed data modes, and feature access (link analysis, AI analysis, triangulation, OSINT, export/import, etc.). Admins can set user tiers in Settings. Backend enforces tier restrictions on analysis and AI endpoints.
-- **Frequency Sharing Analysis:** Only applies to SDR signal types. WiFi, Bluetooth, LoRa, Meshtastic, ADS-B, and RFID frequency matches are excluded since they use standard bands.
-- **Data Mode Persistence:** Data mode selection in Settings saves to user profile via PATCH /api/profile and is validated against tier-allowed modes.
-- **Search & Rescue (SAR) Mode (Page /sar):** Dedicated coordinated search operations page. Create SAR sessions targeting any known node (by name, MAC address, signal type). Team members (Friends mode) report GPS-tagged signal pings from different positions. Real-time RSSI-weighted multilateration computes estimated target position with error radius and confidence. Leaflet map displays team positions, signal pings, probability heatmap, and target fix with error circle. Supports manual ping entry, GPS auto-location, simulation mode for testing, and all signal types. API: `GET/POST/PATCH/DELETE /api/sar/sessions`, `GET/POST/DELETE /api/sar/sessions/:id/pings`, `GET /api/sar/sessions/:id/triangulate`.
-- **Drone Detection & Counter-UAS (Page /drones):** Drone signature database with 11 pre-loaded signatures covering DJI (Mavic, Phantom, FPV, RemoteID), Skydio, Autel, Parrot, generic FPV, RemoteID beacons, unknown UAS, and military/ISR platforms. Signatures categorized by threat level (info, low, medium, high, critical). Scan existing nodes against signature database for drone identification. Counter-UAS awareness section with detection methods (RF, RemoteID BLE, WiFi probe, video downlink) and key frequencies (900 MHz, 2.4 GHz, 5.8 GHz, 1.2 GHz). API: `GET /api/drones/signatures`, `GET/POST/PATCH /api/drones/detections`, `POST /api/drones/scan`.
-- **Signal Decoder (Page /decoder):** Comprehensive signal decoding workbench for decrypting/decoding digital and analog signals. Supports 20+ decoder types including: analog audio (AM, FM, SSB, CW/Morse), digital modes (APRS, PSK31, RTTY, FT8, FT4, WSPR, AX.25, POCSAG, FLEX, DMR, P25, ACARS, NAVTEX), satellite imagery (NOAA APT, Meteor LRPT, SSTV, GOES HRIT), tracking (ADS-B aircraft, AIS ships, LoRa/Meshtastic). Features frequency identification engine with 30+ known frequency allocations, location-aware analysis tips, GPS integration, AI-powered signal analysis (identifies signals based on frequency, location, modulation, and decoded content), decode history, and comprehensive reference databases for digital modes and frequency allocations. API: `GET /api/decoder/modes`, `GET /api/decoder/frequencies`, `POST /api/decoder/identify`, `POST /api/decoder/decode`, `POST /api/decoder/analyze`.
-- **Simplified Dashboard:** Removed complex hardware collector API key management, Python script downloads, and hardware/phone mode toggles. Dashboard now provides streamlined monitoring with one-click start/stop. Integrates Web Bluetooth scanning and Linux scanner controls.
-- **Simplified Settings:** Removed collector API key management and script download sections. Settings focuses on data mode, user preferences, developer mode, and node identity.
-- **Linux Deployment & Git Install:** The app can be cloned from Git and installed on any Linux box (Kali, Ubuntu, Raspberry Pi OS) via `install.sh`. This generates a unique node identity (`.sigint-node.json`), installs dependencies, and sets up the database. Each instance runs the full web UI on port 5000, accessible from any device on the network.
-- **Linux Hardware Scanner Service (server/services/linux-scanner.ts):** Background service that runs continuous passive scans using native Linux tools: `hcitool`/`bluetoothctl` for BLE, `iwconfig`/`iw` for WiFi, `rtl_power` for SDR frequency sweeps, and `gpsd` for GPS. SDR scanning sweeps 9 bands (FM, Aviation, NOAA, 2m Ham, Weather Radio, ISM 433, FRS/GMRS, ISM 915, ADS-B) and auto-creates nodes from detected signals above -45 dBm. Auto-discovers devices and saves them with GPS coordinates. Includes dependency checker that auto-installs missing packages via apt-get when running as root. Controlled via Dashboard start/stop monitoring. API: `GET /api/scanner/status`, `POST /api/scanner/start`, `POST /api/scanner/stop`, `POST /api/scanner/manual-scan`, `GET /api/scanner/dependencies`, `POST /api/scanner/dependencies/install`.
-- **SDR Audio Receiver:** Real-time audio demodulation using `rtl_fm` piped to `sox play` or `aplay`. Supports WFM (wideband FM), NFM (narrowband FM), AM, USB, LSB, and RAW modes. Users can tune to any frequency from the SDR page, click detected signals to listen, or manually enter a frequency. Auto-selects best demod mode (WFM for FM broadcast, AM for aviation, NFM for ham/FRS). API: `GET /api/sdr/audio/status`, `POST /api/sdr/audio/start`, `POST /api/sdr/audio/stop`, `POST /api/sdr/tune`.
-- **Collection Node Identity:** Each Linux instance gets a unique node ID, hostname, and hardware inventory stored in `.sigint-node.json`. The `/api/system/node-info` endpoint exposes node identity, scanner status, installed tools, and network addresses for remote monitoring.
-- **Multi-Node Data Sync:** Collection nodes can push/pull devices and observations to/from a central server via `/api/sync/push` and `/api/sync/pull`. Supports multi-position triangulation by combining data from geographically distributed collectors.
-- **Phone as Monitor:** The server binds to 0.0.0.0:5000, making it accessible from any phone on the same network. Phones open the web UI by IP address to monitor collections discreetly without needing hardware attached. Web Bluetooth scanning still available on Android Chrome for ad-hoc BLE discovery.
-- **Developer Mode (Settings):** Toggle in Settings that persists to user profile. Shows hardware capability diagnostics on Dashboard (Web Bluetooth, GPS, platform type, secure context). Settings always shows node identity, Linux scanner status, and installed tools.
-- **Web Bluetooth Scanning (Dashboard):** Android Chrome users can tap "Scan BLE" during monitoring to discover nearby Bluetooth devices using Web Bluetooth API. Devices are auto-saved with GPS coordinates. Desktop browsers show this only when the API is available.
+**Key Architectural Decisions & Features:**
+- **Signal Collection:** Configurable hardware sensors (Bluetooth, WiFi, RFID, SDR, LoRa, Meshtastic, ADS-B) for real signal collection, managed via the Dashboard.
+- **Device Association (Multi-INT):** Automated analysis links devices using geospatial, signal, and measurement intelligence with statistical outputs.
+- **GEOINT Position Fix:** RSSI-weighted multilateration for device triangulation.
+- **Multi-User & Data Modes:** Supports "Friends" mode for data sharing, "Combined/All Sources" aggregation, and "OSINT" with curated data sources.
+- **Visualizations:** NodeLinkGraph for device associations, Leaflet.heat for signal density.
+- **Data Management:** Full export/import with device ID remapping and MAC address deduplication.
+- **SIGINT Tools Integration:** Includes nmap, Meshtastic, and SDR tools for specialized analysis.
+- **SDR Spectrum Analyzer:** Full-page canvas-based analyzer with real-time spectrum/waterfall, signal detection, and frequency presets. Supports simulation and server-attached RTL-SDR.
+- **Native App Capabilities:** Capacitor setup for iOS/Android with direct hardware access (CoreBluetooth, CoreLocation, Core ML) for BLE scanning, GPS, and on-device AI.
+- **AI-powered Analysis:** Leverages OpenAI's gpt-4o for Multi-INT intelligence analysis (SIGINT, GEOINT, MASINT, OSINT, COMINT).
+- **UI/UX:** Dark cyberpunk theme (cyan, purple, JetBrains Mono font), responsive design.
+- **Tier System:** Five-tier feature gating (Free, Basic, Professional, Enterprise, Admin) controlled by backend.
+- **Search & Rescue (SAR) Mode:** Dedicated page for coordinated SAR operations with real-time RSSI-weighted multilateration, probability heatmaps, and team tracking.
+- **Drone Detection & Counter-UAS:** Database of drone signatures for identification and awareness of detection methods/frequencies.
+- **LoRa Mesh Platform:** Dedicated interface for Meshtastic/Meshcore with live map, messaging, node telemetry, network topology, and full radio configuration.
+- **Signal Decoder:** Workbench for decoding 20+ digital and analog signal types, with frequency identification, AI analysis, and reference databases.
+- **Linux Scanner Service:** Background service using native Linux tools (hcitool, iwconfig, rtl_power, gpsd) for continuous passive scans and SDR frequency sweeps.
+- **SDR Audio Receiver:** Real-time audio demodulation (WFM, NFM, AM, USB, LSB) from SDR signals.
+- **Multi-Node Sync:** Supports data push/pull between collection nodes and a central server for distributed triangulation.
+- **Deployment:** Designed for cloud (Replit), Linux self-hosted installations, and mobile monitoring via web UI.
 
 ## External Dependencies
 - **Database:** PostgreSQL
@@ -57,10 +41,4 @@ The platform is built with a React + TypeScript frontend utilizing Tailwind CSS,
 - **Mapping:** Leaflet, Nominatim (geocoding)
 - **AI/ML:** OpenAI (gpt-4o via Replit AI Integrations)
 - **System Tools:** nmap, rtl-sdr, rtl-power, hcitool, bluetoothctl, iwconfig, gpsd
-- **NPM Packages for Specific Hardware/Protocols:** @meshtastic/core, @meshtastic/transport-http
-
-## Deployment Architecture
-- **Cloud (Replit):** Full web UI + API, Replit Auth, PostgreSQL. Web Bluetooth for ad-hoc BLE on Android Chrome.
-- **Linux Self-Hosted:** `git clone` + `./install.sh` on Kali/Ubuntu/Raspberry Pi. Full hardware scanner with hcitool, iwconfig, rtl_sdr, gpsd. Each instance gets unique node ID.
-- **Multi-Node:** Multiple Linux collectors syncing to central server. Each runs independently with local hardware, pushes data via /api/sync/push.
-- **Mobile Monitoring:** Phone opens http://<node-ip>:5000 on local network. Same UI, discreet monitoring without hardware exposure.
+- **NPM Packages:** @meshtastic/core, @meshtastic/transport-http

@@ -10,7 +10,7 @@ import crypto from "crypto";
 import { type CollectorApiKey } from "@shared/schema";
 import OpenAI from "openai";
 import { checkNmapAvailable, getNmapVersion, runPingScan, runPortScan, runQuickScan, runDiscoveryScan } from "./services/nmap-scanner";
-import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus } from "./services/meshtastic-service";
+import { connectToDevice, disconnectDevice, getConnections, getConnection, fetchNodes, sendMessage, getMeshtasticStatus, getMessages, getChannels, updateChannel, getRadioConfig, updateRadioConfig, getMeshcoreConfig, updateMeshcoreConfig, getTopology, getAllNodes, getAllTopology, getAvailableRegions, getAvailableModemPresets, getAvailableNodeRoles, getAvailableHwModels, getConnectionUptime, removeConnection } from "./services/meshtastic-service";
 import { checkSDRToolsAvailable, getSDRDevices, runPowerScan, getSDRStatus, generateRealisticSpectrum, generateWaterfallFrame, FREQUENCY_PRESETS, identifySignal } from "./services/sdr-service";
 import { getSystemCapabilities } from "./services/system-info";
 import { getNodeConfig, getScannerStatus, startLinuxScanner, stopLinuxScanner, setDeviceCallback, runManualScan, checkAndInstallDependencies, getDependencyStatus, startSDRAudio, stopSDRAudio, tuneSDRAudio, getSDRAudioStatus, type ScannedBLEDevice, type ScannedWiFiDevice, type ScannedSDRSignal, type SDRAudioMode } from "./services/linux-scanner";
@@ -1456,6 +1456,152 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
       res.json({ success });
     } catch (error) {
       res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  app.get("/api/meshtastic/messages/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const channel = req.query.channel !== undefined ? parseInt(req.query.channel) : undefined;
+      res.json(getMessages(req.params.connectionId, channel));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get messages" });
+    }
+  });
+
+  app.get("/api/meshtastic/channels/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      res.json(getChannels(req.params.connectionId));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get channels" });
+    }
+  });
+
+  app.patch("/api/meshtastic/channels/:connectionId/:channelIndex", isAuthenticated, async (req: any, res) => {
+    try {
+      const channelIndex = parseInt(req.params.channelIndex);
+      if (isNaN(channelIndex) || channelIndex < 0 || channelIndex > 7) {
+        return res.status(400).json({ message: "Invalid channel index (0-7)" });
+      }
+      const schema = z.object({
+        name: z.string().max(12).optional(),
+        role: z.enum(["disabled", "primary", "secondary"]).optional(),
+        psk: z.string().optional(),
+        uplinkEnabled: z.boolean().optional(),
+        downlinkEnabled: z.boolean().optional(),
+        positionPrecision: z.number().int().min(0).max(32).optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const result = updateChannel(req.params.connectionId, channelIndex, parsed.data);
+      if (!result) return res.status(404).json({ message: "Connection or channel not found" });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update channel" });
+    }
+  });
+
+  app.get("/api/meshtastic/radio/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const config = getRadioConfig(req.params.connectionId);
+      if (!config) return res.status(404).json({ message: "Connection not found" });
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get radio config" });
+    }
+  });
+
+  app.patch("/api/meshtastic/radio/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        region: z.string().optional(),
+        modemPreset: z.string().optional(),
+        hopLimit: z.number().int().min(1).max(7).optional(),
+        txPower: z.number().int().min(1).max(30).optional(),
+        txEnabled: z.boolean().optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const result = updateRadioConfig(req.params.connectionId, parsed.data);
+      if (!result) return res.status(400).json({ message: "Invalid config values or connection not found" });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update radio config" });
+    }
+  });
+
+  app.get("/api/meshtastic/meshcore/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const config = getMeshcoreConfig(req.params.connectionId);
+      if (!config) return res.status(404).json({ message: "Connection not found" });
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get Meshcore config" });
+    }
+  });
+
+  app.patch("/api/meshtastic/meshcore/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        isRepeater: z.boolean().optional(),
+        managedFlood: z.boolean().optional(),
+        floodRadius: z.number().int().min(1).max(7).optional(),
+        heartbeatInterval: z.number().int().min(60).max(3600).optional(),
+        clientRegistration: z.boolean().optional(),
+        maxClients: z.number().int().min(1).max(256).optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      const result = updateMeshcoreConfig(req.params.connectionId, parsed.data);
+      if (!result) return res.status(404).json({ message: "Connection not found" });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update Meshcore config" });
+    }
+  });
+
+  app.get("/api/meshtastic/topology/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      res.json(getTopology(req.params.connectionId));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get topology" });
+    }
+  });
+
+  app.get("/api/meshtastic/all-nodes", isAuthenticated, async (_req: any, res) => {
+    try {
+      res.json(getAllNodes());
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get all nodes" });
+    }
+  });
+
+  app.get("/api/meshtastic/all-topology", isAuthenticated, async (_req: any, res) => {
+    try {
+      res.json(getAllTopology());
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get topology" });
+    }
+  });
+
+  app.get("/api/meshtastic/config-options", isAuthenticated, async (_req: any, res) => {
+    try {
+      res.json({
+        regions: getAvailableRegions(),
+        modemPresets: getAvailableModemPresets(),
+        nodeRoles: getAvailableNodeRoles(),
+        hwModels: getAvailableHwModels(),
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get config options" });
+    }
+  });
+
+  app.delete("/api/meshtastic/connections/:connectionId", isAuthenticated, async (req: any, res) => {
+    try {
+      const success = removeConnection(req.params.connectionId);
+      res.json({ success });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to remove connection" });
     }
   });
 

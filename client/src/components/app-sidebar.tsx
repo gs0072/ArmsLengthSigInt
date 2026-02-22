@@ -40,6 +40,7 @@ const navItems = [
   { title: "SIGINT Tools", path: "/tools", icon: Wrench },
   { title: "SDR Analyzer", path: "/sdr", icon: Radio },
   { title: "Signal Decoder", path: "/decoder", icon: AudioWaveform },
+  { title: "LoRa Mesh", path: "/mesh", icon: Radio },
   { title: "Search & Rescue", path: "/sar", icon: Target },
   { title: "Drone Detection", path: "/drones", icon: ShieldAlert },
   { title: "Link Analysis", path: "/link-analysis", icon: GitBranch },
