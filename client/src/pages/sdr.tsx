@@ -503,7 +503,7 @@ export default function SDRPage() {
   const { toast } = useToast();
   const [startFreq, setStartFreq] = useState("88");
   const [endFreq, setEndFreq] = useState("108");
-  const [mode, setMode] = useState<ConnectionMode>("simulation");
+  const [mode, setMode] = useState<ConnectionMode>("server");
   const [scanning, setScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(false);
   const [scanHistory, setScanHistory] = useState<SDRSignal[][]>([]);

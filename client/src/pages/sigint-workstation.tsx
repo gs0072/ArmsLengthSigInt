@@ -519,7 +519,7 @@ export default function SigintWorkstation() {
 
   const [startFreq, setStartFreq] = useState("88");
   const [endFreq, setEndFreq] = useState("108");
-  const [mode, setMode] = useState<ConnectionMode>("simulation");
+  const [mode, setMode] = useState<ConnectionMode>("server");
   const [scanning, setScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(false);
   const [scanHistory, setScanHistory] = useState<SDRSignal[][]>([]);
@@ -528,6 +528,7 @@ export default function SigintWorkstation() {
   const [scanCount, setScanCount] = useState(0);
   const [audioDemodMode, setAudioDemodMode] = useState<string>("wfm");
   const [audioSquelch, setAudioSquelch] = useState(0);
+  const [scanInterval, setScanInterval] = useState(1500);
   const autoScanRef = useRef(false);
   const scanTimerRef = useRef<any>(null);
 
@@ -692,7 +693,7 @@ export default function SigintWorkstation() {
       const loop = async () => {
         if (!autoScanRef.current) return;
         await runScan();
-        if (autoScanRef.current) scanTimerRef.current = setTimeout(loop, 1500);
+        if (autoScanRef.current) scanTimerRef.current = setTimeout(loop, scanInterval);
       };
       loop();
     }
@@ -962,8 +963,21 @@ export default function SigintWorkstation() {
             {scanning && !autoScan ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Scanning</> : <><Play className="w-3.5 h-3.5 mr-1" /> Scan</>}
           </Button>
           <Button onClick={toggleAutoScan} variant={autoScan ? "destructive" : "outline"} size="sm" className="h-7 text-xs" data-testid="button-auto-scan">
-            {autoScan ? <><Square className="w-3.5 h-3.5 mr-1" /> Stop</> : <><RotateCcw className="w-3.5 h-3.5 mr-1" /> Auto</>}
+            {autoScan ? <><Square className="w-3.5 h-3.5 mr-1" /> Stop</> : <><RotateCcw className="w-3.5 h-3.5 mr-1" /> Continuous</>}
           </Button>
+          <Select value={String(scanInterval)} onValueChange={(v) => setScanInterval(parseInt(v))}>
+            <SelectTrigger className="w-16 h-7 text-[9px]" data-testid="select-scan-interval">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="500">0.5s</SelectItem>
+              <SelectItem value="1000">1s</SelectItem>
+              <SelectItem value="1500">1.5s</SelectItem>
+              <SelectItem value="2000">2s</SelectItem>
+              <SelectItem value="3000">3s</SelectItem>
+              <SelectItem value="5000">5s</SelectItem>
+            </SelectContent>
+          </Select>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setPeakHold([]); setScanHistory([]); setCurrentSignals([]); setScanCount(0); setClassifiedSignals([]); }} data-testid="button-clear">
             <X className="w-3.5 h-3.5" />
           </Button>

@@ -2810,6 +2810,111 @@ Be specific, technical, and provide real-world context. Use proper intelligence 
     }
   });
 
+  // Multi-source drone watch scan - SDR + WiFi + BLE fusion
+  app.post("/api/drones/watch-scan", isAuthenticated, async (req: any, res) => {
+    try {
+      const { scanDroneBands, analyzeForDrones, generateSimulatedDroneSignals, DRONE_FREQUENCY_BANDS, DRONE_RF_PROFILES } = await import("./services/drone-detector");
+      const userId = req.user.claims.sub;
+
+      const schema = z.object({
+        mode: z.enum(["simulation", "server"]).default("server"),
+        existingDetections: z.array(z.any()).optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request" });
+
+      const mode = parsed.data.mode;
+      const existingDetections = parsed.data.existingDetections || [];
+
+      const sdrBandScans = scanDroneBands(mode);
+      const sdrSignals = sdrBandScans.map(b => b.signals);
+
+      const devices_list = await storage.getDevices(userId);
+      const wifiDevices = devices_list
+        .filter(d => d.signalType === "wifi")
+        .map(d => {
+          const meta = (d.metadata || {}) as Record<string, any>;
+          return {
+            name: d.name || "",
+            macAddress: d.macAddress || "",
+            rssi: meta.rssi || meta.signalStrength || -70,
+            signalType: "wifi",
+            frequency: meta.frequency || "",
+            manufacturer: d.manufacturer || "",
+          };
+        });
+      const bleDevices = devices_list
+        .filter(d => d.signalType === "bluetooth")
+        .map(d => {
+          const meta = (d.metadata || {}) as Record<string, any>;
+          return {
+            name: d.name || "",
+            macAddress: d.macAddress || "",
+            rssi: meta.rssi || meta.signalStrength || -70,
+            signalType: "bluetooth",
+            manufacturer: d.manufacturer || "",
+          };
+        });
+
+      if (mode === "simulation") {
+        const simDevices = generateSimulatedDroneSignals();
+        wifiDevices.push(...simDevices.wifiDevices);
+        bleDevices.push(...simDevices.bleDevices);
+      }
+
+      const detections = analyzeForDrones(sdrSignals, wifiDevices, bleDevices, existingDetections);
+
+      for (const det of detections) {
+        if (det.overallConfidence > 0.5) {
+          try {
+            await storage.createDroneDetection({
+              userId,
+              signalStrength: det.signalSources[0]?.rssi || null,
+              frequency: det.signalSources[0]?.frequencyMHz || null,
+              latitude: null,
+              longitude: null,
+              altitude: null,
+              remoteIdData: {
+                sources: det.signalSources.map(s => ({ type: s.type, freq: s.frequencyMHz, rssi: s.rssi, id: s.identifier })),
+                confidence: det.overallConfidence,
+                matchedProfile: det.bestMatch?.name,
+                distance: det.estimatedDistanceM,
+                direction: det.signalDirection,
+                fusionScore: det.fusionScore,
+              },
+              flightPath: det.flightPath.length > 0 ? det.flightPath : null,
+              status: "active",
+            });
+          } catch {}
+        }
+      }
+
+      await storage.logActivity(userId, "drone_watch_scan", `Multi-source drone scan: ${detections.length} potential drones detected from ${sdrBandScans.length} RF bands + ${wifiDevices.length} WiFi + ${bleDevices.length} BLE devices`);
+
+      res.json({
+        detections,
+        scanSummary: {
+          sdrBands: sdrBandScans.map(b => ({ band: b.band, signalCount: b.signals.length })),
+          wifiDevicesScanned: wifiDevices.length,
+          bleDevicesScanned: bleDevices.length,
+          totalSignalsAnalyzed: sdrSignals.reduce((sum, s) => sum + s.length, 0) + wifiDevices.length + bleDevices.length,
+          dronesDetected: detections.length,
+          highThreatCount: detections.filter(d => d.threatLevel === "high" || d.threatLevel === "critical").length,
+        },
+        timestamp: Date.now(),
+        frequencyBands: DRONE_FREQUENCY_BANDS,
+      });
+    } catch (error: any) {
+      console.error("Drone watch-scan failed:", error);
+      res.status(500).json({ message: "Drone watch-scan failed", error: error.message });
+    }
+  });
+
+  app.get("/api/drones/rf-profiles", isAuthenticated, async (_req: any, res) => {
+    const { DRONE_RF_PROFILES, DRONE_FREQUENCY_BANDS } = await import("./services/drone-detector");
+    res.json({ profiles: DRONE_RF_PROFILES, bands: DRONE_FREQUENCY_BANDS });
+  });
+
   // ============================================================
   // Signal Decoder & Analysis
   // ============================================================
